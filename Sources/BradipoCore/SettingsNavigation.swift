@@ -8,7 +8,11 @@ public struct SettingsNavigation: Sendable {
     /// The section last chosen, which a search that's given up goes back to.
     private var home = SettingsSection.rhythm
     public var query = "" {
-        didSet { selection = results == nil ? .init(section: home) : places.first ?? selection }
+        didSet {
+            // The search field reports its text again a moment after typing stops, which mustn't undo a choice.
+            guard query != oldValue else { return }
+            selection = results == nil ? .init(section: home) : places.first ?? selection
+        }
     }
 
     public init() {}

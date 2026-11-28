@@ -77,6 +77,15 @@ private typealias Place = SettingsSearch.Place
     #expect(navigation.selection == Place(section: .sounds))
 }
 
+@Test func settingTheSameQueryAgainKeepsAnArrowKeyChoice() {
+    var navigation = SettingsNavigation()
+    navigation.query = "sound"
+    navigation.move(by: 1)
+    // The search field reports its text once more a moment after typing stops.
+    navigation.query = "sound"
+    #expect(navigation.selection == Place(section: .sounds, setting: .startSound))
+}
+
 @Test func arrowKeysDoNothingWhileTheSearchFindsNothing() {
     var navigation = SettingsNavigation()
     navigation.query = "glowxyz"

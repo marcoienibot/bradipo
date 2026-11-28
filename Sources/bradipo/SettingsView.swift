@@ -165,6 +165,9 @@ private struct SearchField: NSViewRepresentable {
         let field = NSSearchField()
         field.placeholderString = "Search"
         field.delegate = context.coordinator
+        // While the field doesn't have the keyboard, its clear button empties it with only this action to say so.
+        field.target = context.coordinator
+        field.action = #selector(Coordinator.textChanged(_:))
         return field
     }
 
@@ -182,7 +185,11 @@ private struct SearchField: NSViewRepresentable {
         }
 
         func controlTextDidChange(_ notification: Notification) {
-            if let field = notification.object as? NSSearchField { parent.text = field.stringValue }
+            if let field = notification.object as? NSSearchField { textChanged(field) }
+        }
+
+        @objc func textChanged(_ field: NSSearchField) {
+            if parent.text != field.stringValue { parent.text = field.stringValue }
         }
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
