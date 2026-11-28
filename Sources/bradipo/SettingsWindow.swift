@@ -25,29 +25,8 @@ final class SettingsWindow: NSWindow {
         // Lets the split view put the section's title and the sidebar into the title bar, as in a SwiftUI scene.
         content.sceneBridgingOptions = [.title, .toolbars]
         contentViewController = content
+        // The hosting controller sizes the window later, which would leave it centered by its corner.
+        setContentSize(content.view.fittingSize)
         center()
-        // bradipo shows no menu bar, but AppKit still looks up key equivalents in the main menu.
-        if NSApp.mainMenu == nil { NSApp.mainMenu = .keyEquivalents }
-    }
-}
-
-private extension NSMenu {
-    /// The shortcuts a window with text fields needs: closing it and editing text.
-    static var keyEquivalents: NSMenu {
-        let items = NSMenu()
-        for (title, action, key) in [
-            ("Close", #selector(NSWindow.performClose(_:)), "w"),
-            ("Undo", Selector(("undo:")), "z"),
-            ("Redo", Selector(("redo:")), "Z"),
-            ("Cut", #selector(NSText.cut(_:)), "x"),
-            ("Copy", #selector(NSText.copy(_:)), "c"),
-            ("Paste", #selector(NSText.paste(_:)), "v"),
-            ("Select All", #selector(NSText.selectAll(_:)), "a"),
-        ] {
-            items.addItem(withTitle: title, action: action, keyEquivalent: key)
-        }
-        let menu = NSMenu()
-        menu.addItem(withTitle: "", action: nil, keyEquivalent: "").submenu = items
-        return menu
     }
 }
