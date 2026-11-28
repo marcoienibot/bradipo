@@ -176,3 +176,22 @@ private let nineToFive = WorkingHours(start: 9 * 60, end: 17 * 60, days: .monday
     #expect(hours.nextBoundary(after: moment("2026-09-05T23:00:00-04:00"), in: santiago)
         == moment("2026-09-06T01:00:00-03:00"))
 }
+
+@Test func hoursThatEndAtATimeTheDaySkipsEndAsTheClocksJump() {
+    // In Nuuk, Saturday 27 March 2027 ends at 23:00, as the clocks jump from 22:59:59 to Sunday 0:00.
+    // The evening still has hours, which end with the jump.
+    let nuuk = calendar(in: "America/Nuuk")
+    let hours = WorkingHours(start: 18 * 60, end: 23 * 60 + 30, days: .saturday)
+    #expect(hours.contains(moment("2027-03-27T20:00:00-02:00"), in: nuuk))
+    #expect(hours.nextBoundary(after: moment("2027-03-27T20:00:00-02:00"), in: nuuk)
+        == moment("2027-03-28T00:00:00-01:00"))
+}
+
+@Test func hoursFollowAChangeOfStandardTime() {
+    // On 1 May 2016, Caracas moved from UTC−4:30 to UTC−4:00, and its clocks went from 2:30 to 3:00. That's no
+    // daylight saving time, yet 3:00 is the moment of the change, not half an hour later.
+    let caracas = calendar(in: "America/Caracas")
+    let hours = WorkingHours(start: 3 * 60, end: 8 * 60, days: .sunday)
+    #expect(hours.nextBoundary(after: moment("2016-05-01T00:00:00-04:30"), in: caracas)
+        == moment("2016-05-01T03:00:00-04:00"))
+}
