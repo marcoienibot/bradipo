@@ -70,7 +70,9 @@ private typealias Place = SettingsSearch.Place
     #expect(navigation.selection == Place(section: .sounds, setting: .startSound))
     navigation.move(by: 1)
     #expect(navigation.selection == Place(section: .sounds, setting: .endSound))
-    navigation.move(by: 1)
+    // Stopping at the last result still chooses it, which is what makes the window mark its row again.
+    let choseTheLastResultAgain = navigation.move(by: 1)
+    #expect(choseTheLastResultAgain)
     #expect(navigation.selection == Place(section: .sounds, setting: .endSound))
     // The search began on Rhythm, so staying on Sounds shows that the arrow keys chose.
     navigation.query = ""
