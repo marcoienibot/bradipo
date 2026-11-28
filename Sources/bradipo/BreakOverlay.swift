@@ -167,7 +167,7 @@ final class BreakOverlay: NSObject {
 }
 
 extension Notification.Name {
-    /// Posted after a banner's saved size or position changes: when a drag ends, and after a reset.
+    /// Posted after a banner's saved size or position changes: when a drag ends or is cut short, and after a reset.
     static let bannerPlacementChanged = Notification.Name("bannerPlacementChanged")
 }
 
@@ -183,7 +183,9 @@ private final class ReminderPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 
     override func orderOut(_ sender: Any?) {
-        (contentView as? CardHostingView)?.releaseCursor()
+        let card = contentView as? CardHostingView
+        card?.endDrag()
+        card?.releaseCursor()
         super.orderOut(sender)
     }
 
@@ -379,11 +381,18 @@ private final class CardHostingView: NSHostingView<BreakCard> {
         scheduleCursorUpdate()
     }
 
+    /// Also for a break that ends while its banner is held. No mouse-up follows then, and the drag has
+    /// already saved the banner's new place.
+    func endDrag() {
+        guard grab != nil else { return }
+        grab = nil
+        if isDragging { NotificationCenter.default.post(name: .bannerPlacementChanged, object: nil) }
+    }
+
     override func mouseUp(with event: NSEvent) {
         guard let grab else { return }
         updateDrag(at: event.locationInWindow)
-        self.grab = nil
-        if isDragging { NotificationCenter.default.post(name: .bannerPlacementChanged, object: nil) }
+        endDrag()
         if !isDragging, grab.handle == nil, window?.isVisible == true, bounds.contains(convert(event.locationInWindow, from: nil)) {
             rootView.onEndBreak()
         } else {
