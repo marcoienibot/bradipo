@@ -143,15 +143,26 @@ private struct SavedToggle: View {
     }
 }
 
-/// A pop-up of preset lengths that can also take any other length.
+/// A pop-up of preset lengths, with fields beside it for any other length.
 private struct DurationPicker: View {
-    /// Stands for the item that asks for a length, since no length is negative.
+    /// Stands for the Custom item, since no length is negative.
     private static let custom = -1
     let setting: Setting
     let presets: [Int]
     let apply: () -> Void
     @AppStorage private var saved: Int
+    /// Keeps the fields showing once Custom is chosen or a field takes the keyboard, until a preset is chosen.
+    /// Otherwise typing a preset's length, such as 5:00, and pressing Return would take the fields away mid-edit.
+    @ViewState private var choseCustom = false
+    /// What the fields show. They edit text rather than numbers: a number field can keep showing what was typed,
+    /// such as 120 held to 99, when the number it stands for didn't change.
+    @ViewState private var draft = DurationDraft(0)
+    @FocusState private var focus: Field?
+    @Environment(\.isEnabled) private var isEnabled
     private var seconds: Int { ScheduleLimits.seconds(saved) }
+    private var isCustom: Bool { choseCustom || !presets.contains(seconds) }
+
+    private enum Field { case minutes, seconds }
 
     init(setting: Setting, key: String, presets: [Int], apply: @escaping () -> Void) {
         self.setting = setting
@@ -161,33 +172,79 @@ private struct DurationPicker: View {
     }
 
     var body: some View {
-        Picker(selection: Binding { seconds } set: { $0 == Self.custom ? editCustom() : save($0) }) {
-            ForEach(presets, id: \.self) { value in
-                Text(value.isMultiple(of: 60) ? "\(value / 60) min" : "\(value) sec").tag(value)
+        LabeledContent {
+            if isCustom {
+                HStack(spacing: 4) {
+                    // Three rows have these fields, and VoiceOver can read a field's label without its row's.
+                    field("\(setting.title), minutes", text: $draft.minutes, focus: .minutes)
+                    unit("min")
+                    field("\(setting.title), seconds", text: $draft.seconds, focus: .seconds)
+                    unit("sec")
+                }
             }
-            Divider()
-            if !presets.contains(seconds) {
-                Text(String(format: "%d:%02d", seconds / 60, seconds % 60)).tag(seconds)
+            Picker(setting.title, selection: Binding { isCustom ? Self.custom : seconds } set: { choose($0) }) {
+                ForEach(presets, id: \.self) { value in
+                    Text(value.isMultiple(of: 60) ? "\(value / 60) min" : "\(value) sec").tag(value)
+                }
+                Divider()
+                Text("Custom").tag(Self.custom)
             }
-            Text("Custom…").tag(Self.custom)
+            .labelsHidden()
+            .fixedSize()
         } label: {
             RowLabel(setting)
         }
+        .onChange(of: seconds, initial: true) { draft = DurationDraft(seconds) }
+        // Moving between the two fields keeps editing the same length, so only leaving both saves it.
+        .onChange(of: focus) {
+            if focus == nil { commit() } else { choseCustom = true }
+        }
+        // A click on another section moves the keyboard and swaps the form in the same event, so the row
+        // goes away before it hears that its fields lost the keyboard.
+        .onDisappear(perform: commit)
     }
 
+    /// A grouped form draws a text field without a border, which wouldn't look like it takes typing.
+    private func field(_ title: String, text: Binding<String>, focus field: Field) -> some View {
+        TextField(title, text: text, prompt: Text("0"))
+            .textFieldStyle(.roundedBorder)
+            .multilineTextAlignment(.trailing)
+            .labelsHidden()
+            .frame(width: 40)
+            .focused($focus, equals: field)
+            .onSubmit(commit)
+    }
+
+    /// Text doesn't dim with the controls around it, so the units would stand out next to disabled fields.
+    private func unit(_ text: String) -> some View {
+        Text(text).foregroundStyle(isEnabled ? HierarchicalShapeStyle.secondary : .tertiary)
+    }
+
+    private func choose(_ value: Int) {
+        if value == Self.custom {
+            choseCustom = true
+            focus = .minutes
+        } else {
+            choseCustom = false
+            // Saving also shows the preset in the fields. A field can still have the keyboard, and its edit
+            // would otherwise be saved over the preset once the fields go away.
+            save(value)
+        }
+    }
+
+    /// Saves what the fields ask for. Something that isn't a length shows the saved one again.
+    private func commit() {
+        save(draft.duration ?? seconds)
+    }
+
+    /// Shows a length in the fields, and saves it if it changed.
     private func save(_ value: Int) {
+        draft = DurationDraft(value)
+        // Leaving the fields without changing the length, or choosing the preset that's saved,
+        // shouldn't touch the timer.
+        guard value != seconds else { return }
         saved = value
         apply()
-    }
-
-    private func editCustom() {
-        // The pop-up is still closing. The default mode waits for it, and a modal alert run by a task
-        // would block the main queue, which delivers sleep and microphone changes.
-        RunLoop.main.perform {
-            MainActor.assumeIsolated {
-                if let value = IntervalEditor(title: setting.title, duration: seconds).run() { save(value) }
-            }
-        }
     }
 }
 
