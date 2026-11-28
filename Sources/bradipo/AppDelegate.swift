@@ -26,10 +26,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let activity = ActivityMonitor()
     private var timer: Timer?
     private var startupPeek: SlothPeek?
-    /// Drawn over the countdown's colon while reminders are paused. It's a subview because AppKit places
-    /// an `.imageOverlaps` button image without the status item's padding, so it lands left of the digits,
-    /// and a wide image shifts the digits instead.
-    private let pauseSymbol = ClickThroughImageView()
+    /// Drawn over the countdown's colon while reminders are paused or it's outside working hours. It's a subview
+    /// because AppKit places an `.imageOverlaps` button image without the status item's padding, so it lands left of
+    /// the digits, and a wide image shifts the digits instead.
+    private let stateSymbol = ClickThroughImageView()
 
     private let defaults = UserDefaults.standard
     private var deferBreaksDuringMeetings: Bool { defaults.bool(forKey: DefaultsKey.deferBreaksDuringMeetings) }
@@ -42,6 +42,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             tick()
         }
     }
+    /// Nil while reminders run at all hours.
+    private var workingHours: WorkingHours? {
+        guard defaults.bool(forKey: DefaultsKey.workingHoursOnly) else { return nil }
+        return WorkingHours(start: ScheduleLimits.timeOfDay(defaults.integer(forKey: DefaultsKey.workingHoursStart)),
+                            end: ScheduleLimits.timeOfDay(defaults.integer(forKey: DefaultsKey.workingHoursEnd)),
+                            days: ScheduleLimits.workingDays(defaults.integer(forKey: DefaultsKey.workingDays)))
+    }
+    private var withinWorkingHours: Bool { workingHours?.contains(Date(), in: calendar) ?? true }
+    private let calendar = Calendar.autoupdatingCurrent
     private var clock: BreakTimer
     private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
 
@@ -51,6 +60,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DefaultsKey.longBreaksEnabled: true, DefaultsKey.longBreakSeconds: Int(BreakTimer.defaultLongBreakDuration),
             DefaultsKey.shortBreaksBeforeLongBreak: BreakTimer.defaultShortBreaksBeforeLongBreak,
             DefaultsKey.showBreakBanner: true, DefaultsKey.deferBreaksDuringMeetings: true,
+            DefaultsKey.workingHoursStart: 9 * 60, DefaultsKey.workingHoursEnd: 17 * 60,
+            DefaultsKey.workingDays: DaysOfWeek.mondayToFriday.rawValue,
         ])
         clock = BreakTimer(workDuration: defaults.duration(forKey: DefaultsKey.workSeconds),
                            breakDuration: defaults.duration(forKey: DefaultsKey.breakSeconds),
@@ -72,12 +83,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             button.action = #selector(statusItemClicked(_:))
             button.sendAction(on: [.leftMouseDown, .rightMouseDown])
             button.title = clock.formattedRemainingTime
-            pauseSymbol.image = NSImage(systemSymbolName: "pause.fill", accessibilityDescription: nil)
-            pauseSymbol.symbolConfiguration = .init(pointSize: NSFont.systemFontSize, weight: .bold)
-            pauseSymbol.autoresizingMask = [.width, .height]
-            pauseSymbol.setAccessibilityElement(false)
-            pauseSymbol.isHidden = true
-            button.addSubview(pauseSymbol)
+            stateSymbol.symbolConfiguration = .init(pointSize: NSFont.systemFontSize, weight: .bold)
+            stateSymbol.autoresizingMask = [.width, .height]
+            stateSymbol.setAccessibilityElement(false)
+            stateSymbol.isHidden = true
+            button.addSubview(stateSymbol)
             if let peek = SlothPeek(button: button) {
                 startupPeek = peek
                 button.toolTip = "bradipo · Starting work interval"
@@ -105,8 +115,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let state = activity.sample(detectMeetings: deferBreaksDuringMeetings, fresh: false)
         let start = now
         clock.restart(at: start)
-        clock.tick(at: start, activity: state)
+        clock.tick(at: start, activity: state, withinWorkingHours: withinWorkingHours)
         activity.onChange = { [weak self] in self?.tick() }
+        // Working hours follow the wall clock, which can be set or change time zone while the Mac stays awake.
+        // A new day can change when reminders are back from "tomorrow" to today.
+        for name in [Notification.Name.NSSystemClockDidChange, .NSSystemTimeZoneDidChange, .NSCalendarDayChanged] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.tick() }
+            }
+        }
         render()
     }
 
@@ -193,7 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Use one timestamp, so the tick that starts a break is the one whose sample was fresh.
         let time = now
         let state = activity.sample(detectMeetings: deferBreaksDuringMeetings, fresh: fresh || clock.isBreakDue(at: time))
-        let transition = clock.tick(at: time, activity: state)
+        let transition = clock.tick(at: time, activity: state, withinWorkingHours: withinWorkingHours)
         render()
         if let sound = breakSounds.first(where: { $0.transition == transition })?.sound, defaults.bool(forKey: sound.isOnKey) {
             BreakSound.play(sound.fileName(saved: defaults.string(forKey: sound.fileNameKey)))
@@ -205,23 +222,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let resting = clock.phase == .resting
         let reason: String? = switch clock.pauseReason {
         case .manual: "Reminders paused"
+        case .outsideWorkingHours: outsideWorkingHoursDescription
         case .meeting: "\(clock.breakKind.title) due · \(meetingDescription)"
         case .unavailable: "Paused · Mac is away"
         case nil: nil
         }
         let paused = clock.isManuallyPaused
+        let symbol: String? = switch clock.pauseReason {
+        case .manual: "pause.fill"
+        case .outsideWorkingHours: "moon.fill"
+        case .meeting, .unavailable, nil: nil
+        }
         if let button = statusItem.button {
             button.title = time
-            if paused {
-                // The colon would show between the pause symbol's bars.
+            if symbol != nil {
+                // The colon would show through the symbol, such as between the pause symbol's bars.
                 let title = button.attributedTitle.withForegroundColor(.tertiaryLabelColor)
                 title.addAttribute(.foregroundColor, value: NSColor.clear, range: (time as NSString).range(of: ":"))
                 button.attributedTitle = title
             }
-            pauseSymbol.isHidden = !paused
+            stateSymbol.image = symbol.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: nil) }
+            stateSymbol.isHidden = symbol == nil
             // The title is monospaced, so in m:ss the colon sits half a character left of center.
             let halfCharacter = button.attributedTitle.size().width / CGFloat(time.count) / 2
-            pauseSymbol.frame = button.bounds.offsetBy(dx: time.count == 4 ? -halfCharacter : 0, dy: 0)
+            stateSymbol.frame = button.bounds.offsetBy(dx: time.count == 4 ? -halfCharacter : 0, dy: 0)
             let description = reason ?? (resting ? clock.breakKind.title : "Work interval")
             button.toolTip = "bradipo · \(description)"
             button.setAccessibilityLabel("bradipo, \(description), \(time)")
@@ -244,7 +268,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         timer?.invalidate()
-        guard let delay = clock.timeUntilNextTick else {
+        // Outside working hours nothing else ticks, and a countdown that's held within them resets as they end.
+        guard let delay = clock.timeUntilNextTick
+                ?? workingHours?.nextChange(after: Date(), in: calendar)?.timeIntervalSinceNow else {
             timer = nil
             return
         }
@@ -263,6 +289,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .microphone(let app?): "\(app.name) is using the mic"
         case .microphone(nil), nil: "Mic in use"
         }
+    }
+
+    /// Says when reminders are back: "at 9:00" for today, "tomorrow at 9:00", or "Monday at 9:00" later in the week.
+    private var outsideWorkingHoursDescription: String {
+        guard let start = workingHours?.nextChange(after: Date(), in: calendar) else { return "Outside working hours" }
+        let day = calendar.isDateInToday(start) ? "" : calendar.isDateInTomorrow(start) ? "tomorrow "
+            : "\(start.formatted(.dateTime.weekday(.wide))) "
+        return "Outside working hours · Back \(day)at \(start.formatted(date: .omitted, time: .shortened))"
     }
 
     private var breakActionSubtitle: String? {
@@ -284,7 +318,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func startBreak(_ sender: NSMenuItem) {
         let time = now
-        clock.tick(at: time, activity: activity.sample(detectMeetings: deferBreaksDuringMeetings, fresh: true))
+        clock.tick(at: time, activity: activity.sample(detectMeetings: deferBreaksDuringMeetings, fresh: true),
+                   withinWorkingHours: withinWorkingHours)
         if sender === takeLongBreak {
             clock.startLongBreak(at: time)
         } else {

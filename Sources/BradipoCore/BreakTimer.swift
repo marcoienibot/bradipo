@@ -7,7 +7,7 @@ public enum ActivityState: Equatable, Sendable {
 }
 
 public enum PauseReason: Equatable, Sendable {
-    case manual, meeting, unavailable
+    case manual, outsideWorkingHours, meeting, unavailable
 }
 
 public enum BreakPhase: Equatable, Sendable {
@@ -68,13 +68,15 @@ public struct BreakTimer: Sendable {
         // so a due break needs to recheck even without a device notification.
         case .meeting: 0.25
         case nil: timeUntilNextDisplayedSecond
-        // Resuming from the menu ticks, and notifications report the end of each away state.
-        case .manual, .unavailable: nil
+        // Resuming from the menu ticks, notifications report the end of each away state,
+        // and the app wakes when working hours begin.
+        case .manual, .outsideWorkingHours, .unavailable: nil
         }
     }
     public var pauseReason: PauseReason? {
         guard phase == .working else { return nil }
         if isManuallyPaused { return .manual }
+        if outsideWorkingHours { return .outsideWorkingHours }
         return switch activity {
         case .active: nil
         case .meeting: remaining == 0 ? .meeting : nil
@@ -82,6 +84,7 @@ public struct BreakTimer: Sendable {
         }
     }
 
+    /// Also outside working hours, which only keep breaks from coming due.
     public var canStartBreak: Bool {
         phase == .working && !isManuallyPaused && activity == .active
     }
@@ -100,6 +103,7 @@ public struct BreakTimer: Sendable {
     private var remaining: TimeInterval
     private var lastTick: TimeInterval
     private var activity: ActivityState = .active
+    private var outsideWorkingHours = false
 
     public init(workDuration: TimeInterval, breakDuration: TimeInterval,
                 longBreakDuration: TimeInterval = Self.defaultLongBreakDuration,
@@ -116,16 +120,21 @@ public struct BreakTimer: Sendable {
     }
 
     /// Supply monotonic timestamps and sample the environment before deciding a break is due.
+    ///
+    /// Outside working hours no break comes due, and the work interval waits at its full length, so a fresh one
+    /// starts when they begin. A break that's running when they end still finishes.
     @discardableResult
-    public mutating func tick(at now: TimeInterval, activity newActivity: ActivityState) -> BreakTransition? {
+    public mutating func tick(at now: TimeInterval, activity newActivity: ActivityState,
+                              withinWorkingHours: Bool = true) -> BreakTransition? {
         let wasPaused = pauseReason != nil
         let elapsed = max(0, now - lastTick)
         lastTick = max(lastTick, now)
         activity = newActivity
+        outsideWorkingHours = !withinWorkingHours
 
         switch phase {
         case .working:
-            if activity == .unavailable {
+            if activity == .unavailable || outsideWorkingHours {
                 remaining = workDuration
             } else if pauseReason == nil {
                 if !wasPaused { remaining = max(0, remaining - elapsed) }
