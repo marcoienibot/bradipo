@@ -83,7 +83,8 @@ struct SettingsView: View {
             .navigationTitle(section.title)
         }
         .frame(width: 720, height: 480)
-        // Esc ends a search from anywhere in the window. The search field does it for itself.
+        // Esc ends a search from anywhere in the window, except while a row's length is being typed, which it
+        // cancels first. The search field does it for itself.
         .onExitCommand { navigation.query = "" }
         .onChange(of: navigation.selection) { mark() }
     }

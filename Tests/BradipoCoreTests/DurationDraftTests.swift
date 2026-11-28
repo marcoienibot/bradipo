@@ -10,7 +10,7 @@ import Testing
 
 @Test func numbersBeyondAFieldsRangeAreHeldToIt() {
     // Each field keeps to its own range rather than carrying 75 seconds into a minute,
-    // so the fields end up showing the limit that was hit.
+    // so what's saved is the limit that was hit.
     #expect(DurationDraft(minutes: "120", seconds: "30").duration == 99 * 60 + 30)
     #expect(DurationDraft(minutes: "1", seconds: "75").duration == 60 + 59)
     #expect(DurationDraft(minutes: "-5", seconds: "30").duration == 30)
@@ -49,4 +49,23 @@ import Testing
     #expect(DurationDraft(minutes: "five", seconds: "0").duration == nil)
     #expect(DurationDraft(minutes: "1.5", seconds: "0").duration == nil)
     #expect(DurationDraft(minutes: "1", seconds: "3o").duration == nil)
+}
+
+@Test func aLengthUnderAMinuteIsTitledInSeconds() {
+    #expect(DurationDraft.title(20) == "20 sec")
+}
+
+@Test func wholeMinutesAreTitledWithoutSeconds() {
+    // A typed 1:00 reads like the presets, such as "5 min", rather than "1 min 0 sec".
+    #expect(DurationDraft.title(60) == "1 min")
+}
+
+@Test func aLengthWithMinutesAndSecondsIsTitledWithBoth() {
+    // A typed length shows the units the fields have, rather than "450 sec".
+    #expect(DurationDraft.title(450) == "7 min 30 sec")
+}
+
+@Test func theLongestLengthIsTitledInFull() {
+    // Minutes go past 59 rather than into hours, as in the minutes field.
+    #expect(DurationDraft.title(99 * 60 + 59) == "99 min 59 sec")
 }
