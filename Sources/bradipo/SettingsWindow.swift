@@ -28,6 +28,8 @@ final class SettingsWindow: NSWindow {
         // The hosting controller sizes the window later, which would leave it centered by its corner.
         setContentSize(content.view.fittingSize)
         center()
+        // The sidebar's rows draw their own selection, which stays gray while the list has the keyboard.
+        contentView?.firstSubview(of: NSTableView.self)?.selectionHighlightStyle = .none
     }
 
     /// Typing right after Settings opens searches, as in System Settings.

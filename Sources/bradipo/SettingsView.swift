@@ -14,6 +14,7 @@ struct SettingsView: View {
     @ViewState private var marked: Setting?
     @ViewState private var unmark: Task<Void, Never>?
     @FocusState private var listHasKeyboard: Bool
+    @Environment(\.appearsActive) private var appearsActive
 
     var body: some View {
         // The sidebar is the only way around, so it can't be collapsed.
@@ -29,10 +30,10 @@ struct SettingsView: View {
                 ScrollViewReader { list in
                     // A list's selection is optional, but a section is always showing.
                     List(selection: Binding { navigation.selection } set: { if let place = $0 { navigation.choose(place) } }) {
-                        ForEach(navigation.sections, id: \.place, content: SidebarLabel.init)
+                        ForEach(navigation.sections, id: \.place, content: sidebarRow)
                         if !navigation.settings.isEmpty {
                             Section("Settings") {
-                                ForEach(navigation.settings, id: \.place, content: SidebarLabel.init)
+                                ForEach(navigation.settings, id: \.place, content: sidebarRow)
                             }
                         }
                     }
@@ -88,6 +89,19 @@ struct SettingsView: View {
         .onChange(of: navigation.selection) { mark() }
     }
 
+    /// AppKit's selection takes the accent color while the list has the keyboard, so the settings window turns it off
+    /// and a selected row draws the gray AppKit shows otherwise, as in System Settings.
+    private func sidebarRow(_ hit: SettingsSearch.Hit) -> some View {
+        let selected = hit.place == navigation.selection
+        return SidebarLabel(hit: hit, selected: selected).listRowBackground(
+            // Matches the corner radius and inset of AppKit's own selection, which fades while the window is in the background.
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(selected ? Color(nsColor: .unemphasizedSelectedContentBackgroundColor) : .clear)
+                .opacity(appearsActive ? 1 : 0.5)
+                .padding(.horizontal, 10)
+        )
+    }
+
     private func chooseSelection() {
         if navigation.chooseSelection() { mark() }
     }
@@ -107,11 +121,13 @@ struct SettingsView: View {
 /// with the letters a search matched picked out.
 private struct SidebarLabel: View {
     let hit: SettingsSearch.Hit
+    /// With its selection turned off, AppKit stops moving the bold to the selected row.
+    let selected: Bool
 
     var body: some View {
         Label {
             // Two settings can differ only in their last words.
-            Text(title).lineLimit(2)
+            Text(title).fontWeight(selected ? .semibold : .regular).lineLimit(2)
         } icon: {
             Image(systemName: symbol)
                 .font(.system(size: 11, weight: .semibold))
