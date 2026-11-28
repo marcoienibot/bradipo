@@ -16,6 +16,16 @@ import Testing
     #expect(DurationDraft(minutes: "-5", seconds: "30").duration == 30)
 }
 
+@Test func bothFieldsAtTheirLimitsAreTheLongestLength() {
+    // 99:59 is the longest length the timer runs, so holding each number to its range mustn't cut it short.
+    #expect(DurationDraft(minutes: "99", seconds: "59").duration == 99 * 60 + 59)
+}
+
+@Test func oneSecondIsALength() {
+    // Only 0:00 is turned away, so the shortest length the timer runs can still be typed.
+    #expect(DurationDraft(minutes: "0", seconds: "1").duration == 1)
+}
+
 @Test func anEmptyFieldCountsAsZero() {
     // Someone after a length under a minute can clear the minutes instead of typing 0.
     #expect(DurationDraft(minutes: "", seconds: "30").duration == 30)

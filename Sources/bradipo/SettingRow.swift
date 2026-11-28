@@ -151,7 +151,8 @@ private struct DurationPicker: View {
     let presets: [Int]
     let apply: () -> Void
     @AppStorage private var saved: Int
-    /// Keeps the fields showing after Custom is chosen while a preset is saved, until a preset is chosen.
+    /// Keeps the fields showing once Custom is chosen or a field takes the keyboard, until a preset is chosen.
+    /// Otherwise typing a preset's length, such as 5:00, and pressing Return would take the fields away mid-edit.
     @ViewState private var choseCustom = false
     /// What the fields show. They edit text rather than numbers: a number field can keep showing what was typed,
     /// such as 120 held to 99, when the number it stands for didn't change.
@@ -174,9 +175,10 @@ private struct DurationPicker: View {
         LabeledContent {
             if isCustom {
                 HStack(spacing: 4) {
-                    field("Minutes", text: $draft.minutes, focus: .minutes)
+                    // Three rows have these fields, and VoiceOver can read a field's label without its row's.
+                    field("\(setting.title), minutes", text: $draft.minutes, focus: .minutes)
                     unit("min")
-                    field("Seconds", text: $draft.seconds, focus: .seconds)
+                    field("\(setting.title), seconds", text: $draft.seconds, focus: .seconds)
                     unit("sec")
                 }
             }
@@ -195,8 +197,11 @@ private struct DurationPicker: View {
         .onChange(of: seconds, initial: true) { draft = DurationDraft(seconds) }
         // Moving between the two fields keeps editing the same length, so only leaving both saves it.
         .onChange(of: focus) {
-            if focus == nil { commit() }
+            if focus == nil { commit() } else { choseCustom = true }
         }
+        // A click on another section moves the keyboard and swaps the form in the same event, so the row
+        // goes away before it hears that its fields lost the keyboard.
+        .onDisappear(perform: commit)
     }
 
     /// A grouped form draws a text field without a border, which wouldn't look like it takes typing.
@@ -221,22 +226,23 @@ private struct DurationPicker: View {
             focus = .minutes
         } else {
             choseCustom = false
-            // A field can still have the keyboard, and its edit would otherwise be saved over the preset
-            // once the fields go away.
-            draft = DurationDraft(value)
-            if value != seconds { save(value) }
+            // Saving also shows the preset in the fields. A field can still have the keyboard, and its edit
+            // would otherwise be saved over the preset once the fields go away.
+            save(value)
         }
     }
 
-    /// Saves what the fields ask for, and shows it in them. Something that isn't a length shows the saved one again.
+    /// Saves what the fields ask for. Something that isn't a length shows the saved one again.
     private func commit() {
-        let value = draft.duration ?? seconds
-        // Leaving the fields without changing the length shouldn't touch the timer.
-        if value != seconds { save(value) }
-        draft = DurationDraft(value)
+        save(draft.duration ?? seconds)
     }
 
+    /// Shows a length in the fields, and saves it if it changed.
     private func save(_ value: Int) {
+        draft = DurationDraft(value)
+        // Leaving the fields without changing the length, or choosing the preset that's saved,
+        // shouldn't touch the timer.
+        guard value != seconds else { return }
         saved = value
         apply()
     }
