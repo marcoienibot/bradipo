@@ -30,9 +30,9 @@ public struct DaysOfWeek: OptionSet, Sendable {
 /// 22:00 to 6:00 on Fridays covers Friday night, not Thursday night. Equal times cover 24 hours.
 ///
 /// The times are on the wall clock, so the hours are an hour shorter or longer when the clocks change during them.
-/// A time the clocks skip takes effect when they jump past it, and a time they repeat takes effect the first time.
-/// When the clocks skip both times at once, there are no hours that day.
-public struct WorkingHours: Equatable, Sendable {
+/// A time the clocks skip takes effect when they jump past it, even when they jump into the next day, and a time
+/// they repeat takes effect the first time. When the clocks skip both times at once, there are no hours that day.
+public struct WorkingHours: Sendable {
     /// Minutes after midnight.
     public var start: Int
     /// Minutes after midnight.
@@ -56,7 +56,7 @@ public struct WorkingHours: Equatable, Sendable {
     }
 
     /// The first moment after `date` at which the hours begin or end, or nil if there are none in the next two weeks.
-    /// Where one day's hours end as the next day's begin, nothing changes at the boundary.
+    /// Where one day's hours end as the next day's begin, that moment is still a boundary, though nothing changes there.
     public func nextBoundary(after date: Date, in calendar: Calendar) -> Date? {
         let today = calendar.startOfDay(for: date)
         // The hours that began yesterday can still be going on. A single chosen day can have no hours one week,
@@ -77,7 +77,8 @@ public struct WorkingHours: Equatable, Sendable {
         return from..<to
     }
 
-    /// The first moment of that day at which the clock shows the time or later, or nil if the day ends first.
+    /// The first moment of that day at which the clock shows the time or later. When the clocks jump from before
+    /// the time into the next day, as in Nuuk from 22:59:59 to 0:00, it's the jump, which is the next day's first moment.
     ///
     /// `Calendar.date(bySettingHour:…)` can't stand in: for a time the clocks skip, it can answer with a moment on
     /// a later day, such as the Monday after Lord Howe Island's clocks jump from 2:00 to 2:30 on a Sunday.
@@ -87,15 +88,16 @@ public struct WorkingHours: Equatable, Sendable {
         var from = dayInterval.start
         while from < dayInterval.end {
             // Until the clocks change, the clock moves on with time, so it shows the time that long after `from`.
-            // When it already shows a later time, the clocks jumped past the time at `from`.
+            // When it already shows a later time, the clocks jumped past the time at `from`. Despite its name,
+            // `nextDaylightSavingTimeTransition` reports any change of offset, such as a time zone's new standard time.
             let clock = calendar.dateComponents([.hour, .minute, .second], from: from)
             let shown = TimeInterval((clock.hour ?? 0) * 3600 + (clock.minute ?? 0) * 60 + (clock.second ?? 0))
             let moment = from.addingTimeInterval(max(0, target - shown))
             guard let change = calendar.timeZone.nextDaylightSavingTimeTransition(after: from), change <= moment else {
-                return moment < dayInterval.end ? moment : nil
+                return min(moment, dayInterval.end)
             }
             from = change
         }
-        return nil
+        return dayInterval.end
     }
 }

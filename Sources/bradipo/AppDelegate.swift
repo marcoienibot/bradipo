@@ -49,8 +49,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                             end: ScheduleLimits.timeOfDay(defaults.integer(forKey: DefaultsKey.workingHoursEnd)),
                             days: ScheduleLimits.workingDays(defaults.integer(forKey: DefaultsKey.workingDays)))
     }
-    /// Each tick and the render after it read the clock once, so they agree on which side of a boundary they're on.
-    /// A render that read it again just after the boundary could schedule the wake for the next one instead.
     private func withinWorkingHours(at date: Date) -> Bool {
         workingHours?.contains(date, in: calendar) ?? true
     }
@@ -213,6 +211,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func update(fresh: Bool) {
         // Use one timestamp, so the tick that starts a break is the one whose sample was fresh.
         let time = now
+        // The tick and the render read the wall clock once as well, so they agree on which side of a working-hours
+        // boundary they're on. A render that read it again just after a start could schedule its wake for the end.
         let date = Date()
         let within = withinWorkingHours(at: date)
         let isBreakDue = clock.isBreakDue(at: time, withinWorkingHours: within)
@@ -228,9 +228,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func render(at date: Date) {
         let time = clock.formattedRemainingTime
         let resting = clock.phase == .resting
+        // Outside working hours nothing else ticks, and a countdown that's held within them resets as they end.
+        let boundary = clock.timeUntilNextTick == nil ? workingHours?.nextBoundary(after: date, in: calendar) : nil
         let reason: String? = switch clock.pauseReason {
         case .manual: "Reminders paused"
-        case .outsideWorkingHours: outsideWorkingHoursDescription(at: date)
+        case .outsideWorkingHours: outsideWorkingHoursDescription(back: boundary, from: date)
         case .meeting: "\(clock.breakKind.title) due · \(meetingDescription)"
         case .unavailable: "Paused · Mac is away"
         case nil: nil
@@ -278,9 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         timer?.invalidate()
-        // Outside working hours nothing else ticks, and a countdown that's held within them resets as they end.
-        guard let delay = clock.timeUntilNextTick
-                ?? workingHours?.nextBoundary(after: date, in: calendar)?.timeIntervalSinceNow else {
+        guard let delay = clock.timeUntilNextTick ?? boundary?.timeIntervalSinceNow else {
             timer = nil
             return
         }
@@ -301,14 +301,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// Says when reminders are back: "at 9:00" for today, "tomorrow at 9:00", or "Monday at 9:00" later on.
-    private func outsideWorkingHoursDescription(at date: Date) -> String {
-        guard let start = workingHours?.nextBoundary(after: date, in: calendar) else { return "Outside working hours" }
-        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: start))
-        let day = switch days.day {
-        case 0: ""
-        case 1: "tomorrow "
-        default: "\(start.formatted(.dateTime.weekday(.wide))) "
+    /// Says when reminders are back at `start`, seen from `date`: "at 9:00" for the same day, "tomorrow at 9:00",
+    /// or "Monday at 9:00" later on.
+    private func outsideWorkingHoursDescription(back start: Date?, from date: Date) -> String {
+        guard let start else { return "Outside working hours" }
+        // By calendar day: counting days between their starts goes wrong when a day starts late, such as at 1:00
+        // after a skipped midnight.
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: date)
+        let day = if calendar.isDate(start, inSameDayAs: date) {
+            ""
+        } else if let tomorrow, calendar.isDate(start, inSameDayAs: tomorrow) {
+            "tomorrow "
+        } else {
+            "\(start.formatted(.dateTime.weekday(.wide))) "
         }
         return "Outside working hours · Back \(day)at \(start.formatted(date: .omitted, time: .shortened))"
     }

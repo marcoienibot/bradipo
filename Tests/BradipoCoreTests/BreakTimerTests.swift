@@ -563,6 +563,9 @@ func unavailableMacWaitsForWakeBeforeSchedulingMoreTicks(manuallyPaused: Bool) {
     var timer = BreakTimer(workDuration: 20, breakDuration: 5, now: 0)
     timer.tick(at: 15, activity: .active)
     #expect(timer.remainingSeconds == 5)
+    // At the deadline, the working hours of that tick decide whether the break would start, like they do for `tick`.
+    #expect(timer.isBreakDue(at: 20, withinWorkingHours: true))
+    #expect(!timer.isBreakDue(at: 20, withinWorkingHours: false))
     // The hours end with 5 seconds to go, which start over rather than run out.
     timer.tick(at: 16, activity: .active, withinWorkingHours: false)
     #expect(timer.pauseReason == .outsideWorkingHours)
