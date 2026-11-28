@@ -157,7 +157,6 @@ private struct DurationPicker: View {
     /// What the fields show, kept as the text typed, so the length is read from both fields at once when it's saved.
     @ViewState private var draft = DurationDraft(0)
     @FocusState private var focus: Field?
-    @Environment(\.isEnabled) private var isEnabled
     private var seconds: Int { ScheduleLimits.seconds(saved) }
     /// The presets, with a saved length that isn't one among them, so the pop-up shows what's saved.
     private var lengths: [Int] { presets.contains(seconds) ? presets : (presets + [seconds]).sorted() }
@@ -182,8 +181,9 @@ private struct DurationPicker: View {
                         field("\(setting.title), seconds", text: $draft.seconds, focus: .seconds)
                         unit("sec")
                     }
-                    // Asking for the keyboard in the update that adds the fields leaves it nowhere after closing
-                    // the window took it from them, so it's asked for once they're there.
+                    // onAppear runs before the fields are in the window. Asking for the keyboard then can leave it
+                    // nowhere, such as after closing the window mid-edit and opening it again, so it's asked for
+                    // once they're in the window.
                     .onAppear { DispatchQueue.main.async { focus = .minutes } }
                     // Esc puts the fields away without saving them, instead of ending a search in the sidebar.
                     .onExitCommand { isEditing = false }
@@ -199,7 +199,7 @@ private struct DurationPicker: View {
             // A row's title and the space around the rows don't take the keyboard, so a click there would
             // leave the fields editing. A click on the units, between the fields or on this pop-up keeps editing.
             .background {
-                if isEditing { ClickOutside(perform: commit) }
+                if isEditing { ClickOutside(perform: commit).accessibilityHidden(true) }
             }
         } label: {
             RowLabel(setting)
@@ -224,10 +224,9 @@ private struct DurationPicker: View {
             .onSubmit(commit)
     }
 
-    /// Text doesn't dim with the controls around it, so the units would stand out next to disabled fields.
     private func unit(_ text: String) -> some View {
         Text(text)
-            .foregroundStyle(isEnabled ? HierarchicalShapeStyle.secondary : .tertiary)
+            .foregroundStyle(.secondary)
             // A click on a unit takes the keyboard from the fields without putting it anywhere, which would
             // save the length as if the click were outside them.
             .allowsHitTesting(false)
@@ -287,11 +286,9 @@ private struct ClickOutside: NSViewRepresentable {
             monitor = nil
             guard window != nil else { return }
             monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
-                MainActor.assumeIsolated {
-                    if let self, event.window === self.window,
-                       !self.bounds.contains(self.convert(event.locationInWindow, from: nil)) {
-                        self.perform()
-                    }
+                if let self, event.window === self.window,
+                   !self.bounds.contains(self.convert(event.locationInWindow, from: nil)) {
+                    self.perform()
                 }
                 return event
             }
