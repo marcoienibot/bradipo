@@ -558,3 +558,87 @@ func unavailableMacWaitsForWakeBeforeSchedulingMoreTicks(manuallyPaused: Bool) {
     #expect(!timer.isBreakDue(at: 119))
     #expect(timer.isBreakDue(at: 120))
 }
+
+@Test func outsideWorkingHoursTheCountdownWaitsAtTheFullWorkInterval() {
+    var timer = BreakTimer(workDuration: 20, breakDuration: 5, now: 0)
+    timer.tick(at: 15, activity: .active)
+    #expect(timer.remainingSeconds == 5)
+    // The hours end with 5 seconds to go, which start over rather than run out.
+    timer.tick(at: 16, activity: .active, withinWorkingHours: false)
+    #expect(timer.pauseReason == .outsideWorkingHours)
+    #expect(timer.remainingSeconds == 20)
+    // Long after the old deadline, no break has come due.
+    #expect(!timer.isBreakDue(at: 600))
+    #expect(timer.tick(at: 600, activity: .active, withinWorkingHours: false) == nil)
+    #expect(timer.phase == .working)
+    #expect(timer.remainingSeconds == 20)
+    // Nothing needs to tick. The app wakes when the hours begin.
+    #expect(timer.timeUntilNextTick == nil)
+}
+
+@Test func aFreshWorkIntervalStartsWhenWorkingHoursBegin() {
+    var timer = BreakTimer(workDuration: 20, breakDuration: 5, now: 0)
+    timer.tick(at: 0, activity: .active, withinWorkingHours: false)
+    timer.tick(at: 3600, activity: .active)
+    // The hour outside them doesn't count toward the interval.
+    #expect(timer.pauseReason == nil)
+    #expect(timer.remainingSeconds == 20)
+    #expect(timer.timeUntilNextTick == 1)
+    timer.tick(at: 3601, activity: .active)
+    #expect(timer.remainingSeconds == 19)
+    #expect(timer.tick(at: 3620, activity: .active) == .started)
+}
+
+@Test func aBreakRunningWhenWorkingHoursEndFinishesOnSchedule() {
+    var timer = BreakTimer(workDuration: 20, breakDuration: 5, now: 0)
+    #expect(timer.tick(at: 20, activity: .active) == .started)
+    timer.tick(at: 22, activity: .active, withinWorkingHours: false)
+    #expect(timer.phase == .resting)
+    #expect(timer.remainingSeconds == 3)
+    // It's a finish, unlike a break that time away ends, so its end sound can play.
+    #expect(timer.tick(at: 25, activity: .active, withinWorkingHours: false) == .finished)
+    #expect(timer.pauseReason == .outsideWorkingHours)
+    #expect(timer.remainingSeconds == 20)
+    #expect(timer.timeUntilNextTick == nil)
+}
+
+@Test func aBreakThatAMeetingHoldsAsWorkingHoursEndIsDropped() {
+    var timer = BreakTimer(workDuration: 20, breakDuration: 5, now: 0)
+    timer.tick(at: 20, activity: .meeting)
+    #expect(timer.pauseReason == .meeting)
+    timer.tick(at: 30, activity: .meeting, withinWorkingHours: false)
+    // The call ends after the hours do, and the held break doesn't start outside them.
+    #expect(timer.tick(at: 40, activity: .active, withinWorkingHours: false) == nil)
+    #expect(timer.phase == .working)
+    #expect(timer.remainingSeconds == 20)
+}
+
+@Test func aBreakCanStillBeTakenOutsideWorkingHours() {
+    var timer = BreakTimer(workDuration: 20, breakDuration: 5, now: 0)
+    timer.tick(at: 10, activity: .active, withinWorkingHours: false)
+    // Only the breaks that come due are off, so the menu's break action still works.
+    #expect(timer.canStartBreak)
+    timer.startBreak(at: 10)
+    #expect(timer.phase == .resting)
+    #expect(timer.tick(at: 15, activity: .active, withinWorkingHours: false) == .finished)
+    // Afterwards the countdown waits again.
+    #expect(timer.pauseReason == .outsideWorkingHours)
+    #expect(timer.remainingSeconds == 20)
+}
+
+@Test func pausingByHandLastsAcrossTheEndAndStartOfWorkingHours() {
+    var timer = BreakTimer(workDuration: 20, breakDuration: 5, now: 0)
+    timer.tick(at: 5, activity: .active)
+    timer.setManuallyPaused(true, at: 5)
+    // The pause shows rather than the hours, as only resuming ends it.
+    timer.tick(at: 100, activity: .active, withinWorkingHours: false)
+    #expect(timer.pauseReason == .manual)
+    #expect(timer.remainingSeconds == 20)
+    // The hours begin again. Reminders stay paused, with a fresh interval waiting.
+    timer.tick(at: 200, activity: .active)
+    #expect(timer.pauseReason == .manual)
+    #expect(timer.remainingSeconds == 20)
+    timer.setManuallyPaused(false, at: 300)
+    timer.tick(at: 301, activity: .active)
+    #expect(timer.remainingSeconds == 19)
+}

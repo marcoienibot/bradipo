@@ -137,6 +137,7 @@ private struct SidebarLabel: View {
     private var symbol: String {
         switch place.section {
         case .rhythm: "timer"
+        case .workingHours: "briefcase.fill"
         case .breakScreen: "sparkles"
         case .sounds: "speaker.wave.2.fill"
         case .meetings: "video.fill"
@@ -147,6 +148,7 @@ private struct SidebarLabel: View {
     private var tint: Color {
         switch place.section {
         case .rhythm: .green
+        case .workingHours: .orange
         case .breakScreen: .purple
         case .sounds: .pink
         case .meetings: .teal

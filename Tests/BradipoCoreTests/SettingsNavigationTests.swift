@@ -107,7 +107,7 @@ private typealias Place = SettingsSearch.Place
     #expect(navigation.selection == Place(section: .meetings))
     // The sidebar lists the sections again, not the results of a search for spaces.
     #expect(navigation.settings.isEmpty)
-    #expect(navigation.sections.count == 5)
+    #expect(navigation.sections.count == 6)
 }
 
 @Test func typingMoreAfterAChoiceShowsTheNewBestMatchButGoesBackToTheChoice() {
@@ -123,6 +123,6 @@ private typealias Place = SettingsSearch.Place
 
 @Test func withoutASearchTheSidebarListsEverySection() {
     let navigation = SettingsNavigation()
-    #expect(navigation.sections.map(\.place.section) == [.rhythm, .breakScreen, .sounds, .meetings, .general])
+    #expect(navigation.sections.map(\.place.section) == [.rhythm, .workingHours, .breakScreen, .sounds, .meetings, .general])
     #expect(navigation.settings.isEmpty)
 }

@@ -105,3 +105,16 @@ private func highlights(of query: String, in title: String) -> [String]? {
     #expect(SettingsSearch.results(for: "microphone").settings.map(\.place.setting) == [.deferDuringMeetings, .ignoredApps])
     #expect(SettingsSearch.results(for: "camera").settings.map(\.place.setting) == [.deferDuringMeetings])
 }
+
+@Test func searchFindsTheWorkingHoursAsASchedule() {
+    #expect(SettingsSearch.results(for: "schedule").settings.map(\.place.setting)
+        == [.workingHoursOnly, .workingHours, .workingDays])
+    #expect(SettingsSearch.results(for: "weekends").settings.map(\.place.setting) == [.workingDays])
+}
+
+@Test func searchForHoursOpensTheWorkingHoursSection() {
+    // "Hours" starts a word of the section's title, so the section is listed first and opens as someone types.
+    let results = SettingsSearch.results(for: "hours")
+    #expect(results.sections.map(\.place.section) == [.workingHours])
+    #expect(results.settings.map(\.place.setting) == [.workingHoursOnly, .workingHours])
+}

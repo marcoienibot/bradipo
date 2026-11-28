@@ -19,12 +19,18 @@ struct SettingRow: View {
         case .longBreaks:
             SavedToggle(setting: setting, key: DefaultsKey.longBreaksEnabled, apply: host.apply)
         case .longBreakLength:
-            LongBreakRow {
+            DependentRow(on: DefaultsKey.longBreaksEnabled) {
                 DurationPicker(setting: setting, key: DefaultsKey.longBreakSeconds,
                                presets: [5, 10, 15, 20, 30].map { $0 * 60 }, apply: host.apply)
             }
         case .longBreakFrequency:
-            LongBreakRow { ShortBreakCount(apply: host.apply) }
+            DependentRow(on: DefaultsKey.longBreaksEnabled) { ShortBreakCount(apply: host.apply) }
+        case .workingHoursOnly:
+            SavedToggle(setting: setting, key: DefaultsKey.workingHoursOnly, apply: host.apply)
+        case .workingHours:
+            DependentRow(on: DefaultsKey.workingHoursOnly) { WorkingHoursTimes(apply: host.apply) }
+        case .workingDays:
+            DependentRow(on: DefaultsKey.workingHoursOnly) { WorkingDays(apply: host.apply) }
         case .showBanner:
             SavedToggle(setting: setting, key: DefaultsKey.showBreakBanner, apply: host.apply)
         case .bannerPlacement:
@@ -116,13 +122,18 @@ private enum About {
     }
 }
 
-/// Greys out a row that only matters while long breaks are on.
-private struct LongBreakRow<Content: View>: View {
-    @ViewBuilder let content: Content
-    @AppStorage(DefaultsKey.longBreaksEnabled) private var longBreaks = false
+/// Greys out a row that only matters while the switch saved under a key is on.
+private struct DependentRow<Content: View>: View {
+    let content: Content
+    @AppStorage private var isOn: Bool
+
+    init(on key: String, @ViewBuilder content: () -> Content) {
+        self.content = content()
+        _isOn = AppStorage(wrappedValue: false, key)
+    }
 
     var body: some View {
-        content.disabled(!longBreaks)
+        content.disabled(!isOn)
     }
 }
 
@@ -316,6 +327,78 @@ private struct ShortBreakCount: View {
             Stepper(Setting.longBreakFrequency.title, value: count, in: 1...Int.max).labelsHidden()
         } label: {
             RowLabel(.longBreakFrequency)
+        }
+        .onChange(of: saved) { apply() }
+    }
+}
+
+/// When working hours start and end, each saved in minutes after midnight.
+private struct WorkingHoursTimes: View {
+    let apply: () -> Void
+    @AppStorage(DefaultsKey.workingHoursStart) private var start = 0
+    @AppStorage(DefaultsKey.workingHoursEnd) private var end = 0
+
+    var body: some View {
+        LabeledContent {
+            TimeOfDayPicker(title: "Start", minutes: $start)
+            Text("to")
+            TimeOfDayPicker(title: "End", minutes: $end)
+        } label: {
+            RowLabel(.workingHours, detail: ScheduleLimits.timeOfDay(end) <= ScheduleLimits.timeOfDay(start)
+                ? "Ends the next day." : nil)
+        }
+        .onChange(of: start) { apply() }
+        .onChange(of: end) { apply() }
+    }
+}
+
+/// A time of day saved in minutes after midnight. The picker shows it on a day in GMT, which never changes its
+/// clocks, so it can't land on a time that the local clocks skip today.
+private struct TimeOfDayPicker: View {
+    private static let calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .gmt
+        return calendar
+    }()
+    let title: String
+    @Binding var minutes: Int
+
+    var body: some View {
+        DatePicker(title, selection: Binding {
+            Date(timeIntervalSinceReferenceDate: TimeInterval(ScheduleLimits.timeOfDay(minutes) * 60))
+        } set: { date in
+            let time = Self.calendar.dateComponents([.hour, .minute], from: date)
+            minutes = (time.hour ?? 0) * 60 + (time.minute ?? 0)
+        }, displayedComponents: .hourAndMinute)
+        .labelsHidden()
+        .environment(\.timeZone, .gmt)
+    }
+}
+
+/// A checkbox for each day of the week, in the order weeks start in the person's region.
+private struct WorkingDays: View {
+    let apply: () -> Void
+    @AppStorage(DefaultsKey.workingDays) private var saved = 0
+    @Environment(\.calendar) private var calendar
+    private var weekdays: [Int] { (0..<7).map { (calendar.firstWeekday - 1 + $0) % 7 + 1 } }
+
+    var body: some View {
+        let days = ScheduleLimits.workingDays(saved)
+        LabeledContent {
+            HStack(spacing: 12) {
+                ForEach(weekdays, id: \.self) { weekday in
+                    let day = DaysOfWeek(weekday: weekday)
+                    Toggle(calendar.shortStandaloneWeekdaySymbols[weekday - 1], isOn: Binding { days.contains(day) } set: {
+                        saved = ($0 ? days.union(day) : days.subtracting(day)).rawValue
+                    })
+                    .accessibilityLabel(calendar.standaloneWeekdaySymbols[weekday - 1])
+                    // Without a day, reminders would never come back.
+                    .disabled(days == day)
+                }
+            }
+            .toggleStyle(.checkbox)
+        } label: {
+            RowLabel(.workingDays)
         }
         .onChange(of: saved) { apply() }
     }

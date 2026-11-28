@@ -1,10 +1,11 @@
 /// A section of the settings window, in sidebar order.
 public enum SettingsSection: CaseIterable, Hashable, Sendable {
-    case rhythm, breakScreen, sounds, meetings, general
+    case rhythm, workingHours, breakScreen, sounds, meetings, general
 
     public var title: String {
         switch self {
         case .rhythm: "Rhythm"
+        case .workingHours: "Working Hours"
         case .breakScreen: "Break Screen"
         case .sounds: "Sounds"
         case .meetings: "Meetings"
@@ -16,6 +17,7 @@ public enum SettingsSection: CaseIterable, Hashable, Sendable {
     public var groups: [[Setting]] {
         switch self {
         case .rhythm: [[.workInterval, .shortBreakLength], [.longBreaks, .longBreakLength, .longBreakFrequency]]
+        case .workingHours: [[.workingHoursOnly, .workingHours, .workingDays]]
         case .breakScreen: [[.showBanner, .bannerPlacement], [.accentColor, .glowIntensity], [.screenSharing]]
         case .sounds: [[.startSound, .endSound]]
         case .meetings: [[.deferDuringMeetings], [.ignoredApps]]
@@ -27,6 +29,7 @@ public enum SettingsSection: CaseIterable, Hashable, Sendable {
 /// A row of the settings window. The window takes each row's words and its place from here.
 public enum Setting: CaseIterable, Hashable, Sendable {
     case workInterval, shortBreakLength, longBreaks, longBreakLength, longBreakFrequency
+    case workingHoursOnly, workingHours, workingDays
     case showBanner, bannerPlacement, accentColor, glowIntensity, screenSharing
     case startSound, endSound
     case deferDuringMeetings, ignoredApps
@@ -39,6 +42,9 @@ public enum Setting: CaseIterable, Hashable, Sendable {
         case .longBreaks: "Long breaks"
         case .longBreakLength: "Long break length"
         case .longBreakFrequency: "Short breaks before a long break"
+        case .workingHoursOnly: "Remind only during working hours"
+        case .workingHours: "Hours"
+        case .workingDays: "Days"
         case .showBanner: "Show the break banner"
         case .bannerPlacement: "Banner size and position"
         case .accentColor: "Accent color"
@@ -61,6 +67,9 @@ public enum Setting: CaseIterable, Hashable, Sendable {
         switch self {
         case .workInterval, .shortBreakLength, .longBreakLength: ["Custom"]
         case .longBreakFrequency: ["Long break after", "Long break frequency"]
+        case .workingHoursOnly: ["Schedule"]
+        case .workingHours: ["Schedule", "Start", "End", "Time"]
+        case .workingDays: ["Schedule", "Weekdays", "Weekends"]
         case .bannerPlacement: ["Reset on All Displays"]
         case .accentColor: ["Restore Default Green"]
         case .startSound: ["Play Sound When Breaks Start"]
@@ -78,6 +87,7 @@ public enum Setting: CaseIterable, Hashable, Sendable {
     public var detail: String? {
         switch self {
         case .longBreaks: "Turn off to take only short breaks."
+        case .workingHoursOnly: "Outside them, no break comes due, and the countdown waits at its full length."
         case .showBanner: "Without it, a break shows only the border glow."
         case .bannerPlacement: "Drag the banner during a break to move or resize it."
         case .accentColor: "Colors the border glow and the banner."
