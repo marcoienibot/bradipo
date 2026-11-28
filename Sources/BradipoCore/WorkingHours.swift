@@ -93,7 +93,8 @@ public struct WorkingHours: Sendable {
             let clock = calendar.dateComponents([.hour, .minute, .second], from: from)
             let shown = TimeInterval((clock.hour ?? 0) * 3600 + (clock.minute ?? 0) * 60 + (clock.second ?? 0))
             let moment = from.addingTimeInterval(max(0, target - shown))
-            guard let change = calendar.timeZone.nextDaylightSavingTimeTransition(after: from), change <= moment else {
+            // Not `change <= moment`: `Date`'s `<=` is new in macOS 27.2, and CI tests on an older macOS.
+            guard let change = calendar.timeZone.nextDaylightSavingTimeTransition(after: from), !(change > moment) else {
                 return min(moment, dayInterval.end)
             }
             from = change
