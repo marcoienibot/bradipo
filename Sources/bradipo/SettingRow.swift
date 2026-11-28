@@ -208,8 +208,8 @@ private struct DurationPicker: View {
         .onChange(of: focus) {
             if focus == nil { commit() }
         }
-        // A click on another section moves the keyboard and swaps the form in the same event, so the row
-        // goes away before it hears that its fields lost the keyboard.
+        // The click watcher saves before a click on another section swaps the form. This saves an edit that's
+        // still open if the row goes away some other way.
         .onDisappear(perform: commit)
     }
 
