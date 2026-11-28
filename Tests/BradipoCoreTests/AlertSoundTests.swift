@@ -1,4 +1,5 @@
 import BradipoCore
+import Foundation
 import Testing
 
 @Test func aChosenSoundPlays() {
@@ -23,4 +24,15 @@ import Testing
     // Settings with no sound chosen.
     #expect(AlertSound.all.first { $0.fileName == AlertSound.breakStartDefault }?.title == "Pluck")
     #expect(AlertSound.all.first { $0.fileName == AlertSound.breakEndDefault }?.title == "Crystal")
+}
+
+@Test func everyAlertSoundIsASoundInTheSystemFolder() {
+    // The table is copied by hand from the system, and NSSound looks a sound up by its file name, so a misspelled
+    // one, such as Sosume, would play nothing while Settings showed it as chosen.
+    for sound in AlertSound.all {
+        #expect(
+            FileManager.default.fileExists(atPath: "/System/Library/Sounds/\(sound.fileName).aiff"),
+            "No system sound is named \(sound.fileName)"
+        )
+    }
 }
