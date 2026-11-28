@@ -19,14 +19,24 @@ public struct DurationDraft: Equatable, Sendable {
         self.seconds = seconds
     }
 
-    /// The length in seconds the fields ask for. A number outside its field's range is held to it, so the fields
-    /// show the limit that was hit. An empty field counts as 0, as its placeholder shows.
+    /// The length in seconds the fields ask for. A number outside its field's range is held to it, so a slip such as
+    /// 120 minutes saves the limit that was hit, which the pop-up then shows. An empty field counts as 0, as its
+    /// placeholder shows.
     /// It's nil for text that isn't a whole number, for a number too big for `Int` such as twenty 9s, and for 0:00,
     /// so the row keeps the saved length.
     public var duration: Int? {
         guard let minutes = Self.number(minutes, in: 0...99), let seconds = Self.number(seconds, in: 0...59),
               minutes + seconds > 0 else { return nil }
         return minutes * 60 + seconds
+    }
+
+    /// A length in the units of the fields, such as "7 min 30 sec", for the pop-up beside them.
+    public static func title(_ duration: Int) -> String {
+        switch (duration / 60, duration % 60) {
+        case let (0, seconds): "\(seconds) sec"
+        case let (minutes, 0): "\(minutes) min"
+        case let (minutes, seconds): "\(minutes) min \(seconds) sec"
+        }
     }
 
     private static func number(_ text: String, in range: ClosedRange<Int>) -> Int? {

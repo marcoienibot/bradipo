@@ -143,7 +143,7 @@ private struct SavedToggle: View {
     }
 }
 
-/// A pop-up of preset lengths, with fields beside it for any other length.
+/// A pop-up of preset lengths, with fields beside it to type any other length.
 private struct DurationPicker: View {
     /// Stands for the Custom item, since no length is negative.
     private static let custom = -1
@@ -151,16 +151,15 @@ private struct DurationPicker: View {
     let presets: [Int]
     let apply: () -> Void
     @AppStorage private var saved: Int
-    /// Keeps the fields showing once Custom is chosen or a field takes the keyboard, until a preset is chosen.
-    /// Otherwise typing a preset's length, such as 5:00, and pressing Return would take the fields away mid-edit.
-    @ViewState private var choseCustom = false
-    /// What the fields show. They edit text rather than numbers: a number field can keep showing what was typed,
-    /// such as 120 held to 99, when the number it stands for didn't change.
+    /// Shows the fields from choosing Custom until Return or leaving them saves the length in them. Choosing a preset
+    /// or pressing Esc puts them away without saving it.
+    @ViewState private var isEditing = false
+    /// What the fields show, kept as the text typed, so the length is read from both fields at once when it's saved.
     @ViewState private var draft = DurationDraft(0)
     @FocusState private var focus: Field?
-    @Environment(\.isEnabled) private var isEnabled
     private var seconds: Int { ScheduleLimits.seconds(saved) }
-    private var isCustom: Bool { choseCustom || !presets.contains(seconds) }
+    /// The presets, with a saved length that isn't one among them, so the pop-up shows what's saved.
+    private var lengths: [Int] { presets.contains(seconds) ? presets : (presets + [seconds]).sorted() }
 
     private enum Field { case minutes, seconds }
 
@@ -173,34 +172,44 @@ private struct DurationPicker: View {
 
     var body: some View {
         LabeledContent {
-            if isCustom {
-                HStack(spacing: 4) {
-                    // Three rows have these fields, and VoiceOver can read a field's label without its row's.
-                    field("\(setting.title), minutes", text: $draft.minutes, focus: .minutes)
-                    unit("min")
-                    field("\(setting.title), seconds", text: $draft.seconds, focus: .seconds)
-                    unit("sec")
+            HStack {
+                if isEditing {
+                    HStack(spacing: 4) {
+                        // Three rows have these fields, and VoiceOver can read a field's label without its row's.
+                        field("\(setting.title), minutes", text: $draft.minutes, focus: .minutes)
+                        unit("min")
+                        field("\(setting.title), seconds", text: $draft.seconds, focus: .seconds)
+                        unit("sec")
+                    }
+                    // onAppear runs before the fields are in the window. Asking for the keyboard then can leave it
+                    // nowhere, such as after closing the window mid-edit and opening it again, so it's asked for
+                    // once they're in the window.
+                    .onAppear { DispatchQueue.main.async { focus = .minutes } }
+                    // Esc puts the fields away without saving them, instead of ending a search in the sidebar.
+                    .onExitCommand { isEditing = false }
                 }
-            }
-            Picker(setting.title, selection: Binding { isCustom ? Self.custom : seconds } set: { choose($0) }) {
-                ForEach(presets, id: \.self) { value in
-                    Text(value.isMultiple(of: 60) ? "\(value / 60) min" : "\(value) sec").tag(value)
+                Picker(setting.title, selection: Binding { isEditing ? Self.custom : seconds } set: { choose($0) }) {
+                    ForEach(lengths, id: \.self) { Text(DurationDraft.title($0)).tag($0) }
+                    Divider()
+                    Text("Custom").tag(Self.custom)
                 }
-                Divider()
-                Text("Custom").tag(Self.custom)
+                .labelsHidden()
+                .fixedSize()
             }
-            .labelsHidden()
-            .fixedSize()
+            // A row's title and the space around the rows don't take the keyboard, so a click there would
+            // leave the fields editing. A click on the units, between the fields or on this pop-up keeps editing.
+            .background {
+                if isEditing { ClickOutside(perform: commit).accessibilityHidden(true) }
+            }
         } label: {
             RowLabel(setting)
         }
-        .onChange(of: seconds, initial: true) { draft = DurationDraft(seconds) }
         // Moving between the two fields keeps editing the same length, so only leaving both saves it.
         .onChange(of: focus) {
-            if focus == nil { commit() } else { choseCustom = true }
+            if focus == nil { commit() }
         }
-        // A click on another section moves the keyboard and swaps the form in the same event, so the row
-        // goes away before it hears that its fields lost the keyboard.
+        // The click watcher saves before a click on another section swaps the form. This saves an edit that's
+        // still open if the row goes away some other way.
         .onDisappear(perform: commit)
     }
 
@@ -215,36 +224,80 @@ private struct DurationPicker: View {
             .onSubmit(commit)
     }
 
-    /// Text doesn't dim with the controls around it, so the units would stand out next to disabled fields.
     private func unit(_ text: String) -> some View {
-        Text(text).foregroundStyle(isEnabled ? HierarchicalShapeStyle.secondary : .tertiary)
+        Text(text)
+            .foregroundStyle(.secondary)
+            // A click on a unit takes the keyboard from the fields without putting it anywhere, which would
+            // save the length as if the click were outside them.
+            .allowsHitTesting(false)
     }
 
     private func choose(_ value: Int) {
         if value == Self.custom {
-            choseCustom = true
-            focus = .minutes
+            // Choosing Custom again while typing keeps what's typed.
+            if !isEditing {
+                draft = DurationDraft(seconds)
+                isEditing = true
+            }
         } else {
-            choseCustom = false
-            // Saving also shows the preset in the fields. A field can still have the keyboard, and its edit
-            // would otherwise be saved over the preset once the fields go away.
+            // The fields keep the keyboard while the pop-up is open. Putting them away first means they don't
+            // save their edit as they lose it, so only the preset is saved.
+            isEditing = false
             save(value)
         }
     }
 
-    /// Saves what the fields ask for. Something that isn't a length shows the saved one again.
+    /// Saves what the fields ask for and puts them away. Something that isn't a length keeps the saved one.
     private func commit() {
+        guard isEditing else { return }
+        isEditing = false
         save(draft.duration ?? seconds)
     }
 
-    /// Shows a length in the fields, and saves it if it changed.
     private func save(_ value: Int) {
-        draft = DurationDraft(value)
         // Leaving the fields without changing the length, or choosing the preset that's saved,
         // shouldn't touch the timer.
         guard value != seconds else { return }
         saved = value
         apply()
+    }
+}
+
+/// Calls its action on a click in its window outside its frame. It watches clicks before they're delivered,
+/// so it hears them even where nothing takes the click.
+private struct ClickOutside: NSViewRepresentable {
+    let perform: () -> Void
+
+    func makeNSView(context: Context) -> Watcher {
+        Watcher()
+    }
+
+    func updateNSView(_ view: Watcher, context: Context) {
+        view.perform = perform
+    }
+
+    final class Watcher: NSView {
+        var perform: () -> Void = {}
+        private var monitor: Any?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+                if let self, event.window === self.window,
+                   !self.bounds.contains(self.convert(event.locationInWindow, from: nil)) {
+                    self.perform()
+                }
+                return event
+            }
+        }
+
+        /// Clicks go on to the pop-up and fields in front of it.
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            nil
+        }
     }
 }
 
