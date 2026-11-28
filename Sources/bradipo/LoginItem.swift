@@ -1,31 +1,29 @@
 import AppKit
+import Observation
 import ServiceManagement
 
-@MainActor
-final class LoginItem: NSObject {
-    let menuItem = NSMenuItem(title: "Launch at Login", action: nil, keyEquivalent: "")
+@MainActor @Observable
+final class LoginItem {
+    private(set) var status: SMAppService.Status
     private let service = SMAppService.mainApp
 
-    override init() {
-        super.init()
-        menuItem.target = self
-        menuItem.action = #selector(toggle)
+    init() {
+        status = service.status
     }
 
+    /// The person can approve or remove the login item in System Settings while bradipo runs.
     func refresh() {
-        let status = service.status
-        switch status {
-        case .enabled: menuItem.state = .on
-        case .requiresApproval: menuItem.state = .mixed
-        default: menuItem.state = .off
-        }
-        menuItem.subtitle = status == .requiresApproval ? "Approve in System Settings…" : nil
+        status = service.status
     }
 
-    @objc private func toggle() {
-        let status = service.status
+    func setEnabled(_ enabled: Bool) {
+        // The switch can show a status older than a change made in System Settings.
+        // Then the login item may already be as asked, and flipping it would do the opposite.
+        refresh()
+        guard enabled != (status == .enabled) else { return }
+        defer { refresh() }
         do {
-            if status == .enabled {
+            guard enabled else {
                 try service.unregister()
                 return
             }

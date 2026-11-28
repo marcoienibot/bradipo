@@ -1,27 +1,17 @@
 import AppKit
 import BradipoCore
+import Observation
 
-@MainActor
-final class Updater: NSObject {
-    let menuItem = NSMenuItem()
+@MainActor @Observable
+final class Updater {
+    /// What the update is doing, or nil while there's none to wait for.
+    private(set) var progress: String?
     private let releasesPage = URL(string: "https://github.com/marcoieni/bradipo/releases")!
     private let latestRelease = URL(string: "https://api.github.com/repos/marcoieni/bradipo/releases/latest")!
     private let session = URLSession(configuration: .ephemeral)
 
-    override init() {
-        super.init()
-        menuItem.target = self
-        menuItem.action = #selector(checkForUpdates)
-        showProgress(nil)
-    }
-
-    private func showProgress(_ title: String?) {
-        menuItem.title = title ?? "Check for Updates…"
-        menuItem.isEnabled = title == nil
-    }
-
-    @objc private func checkForUpdates() {
-        showProgress("Checking for Updates…")
+    func checkForUpdates() {
+        progress = "Checking for Updates…"
         Task {
             do {
                 try await update()
@@ -30,7 +20,7 @@ final class Updater: NSObject {
                                          buttons: "Open Releases Page", "Cancel")
                 if openPage { NSWorkspace.shared.open(releasesPage) }
             }
-            showProgress(nil)
+            progress = nil
         }
     }
 
@@ -53,7 +43,7 @@ final class Updater: NSObject {
                         "You have version \(current). Relaunching restarts the timer and resumes paused reminders.",
                         buttons: "Install and Relaunch", "Cancel") else { return }
 
-        showProgress("Installing bradipo \(release.version)…")
+        progress = "Installing bradipo \(release.version)…"
         let data = try await fetch(archive.url)
         try await Task.detached {
             try UpdateInstaller.install(data, digest: archive.digest, version: release.version, over: app)
