@@ -16,12 +16,14 @@ final class LoginItem {
         status = service.status
     }
 
-    func toggle() {
-        // The status shown can be older than a change made in System Settings.
+    func setEnabled(_ enabled: Bool) {
+        // The switch can show a status older than a change made in System Settings.
+        // Then the login item may already be as asked, and flipping it would do the opposite.
         refresh()
+        guard enabled != (status == .enabled) else { return }
         defer { refresh() }
         do {
-            if status == .enabled {
+            guard enabled else {
                 try service.unregister()
                 return
             }

@@ -329,7 +329,7 @@ private struct LoginToggle: View {
 
     var body: some View {
         // When macOS wants the login item approved, turning the switch on opens System Settings.
-        Toggle(isOn: Binding { login.status == .enabled } set: { _ in login.toggle() }) {
+        Toggle(isOn: Binding { login.status == .enabled } set: { login.setEnabled($0) }) {
             RowLabel(.launchAtLogin, detail: login.status == .requiresApproval ? "Approve in System Settings…" : nil)
         }
         .onAppear(perform: login.refresh)
