@@ -382,11 +382,15 @@ private struct WorkingHoursTimes: View {
             Text("to")
             TimeOfDayPicker(title: "End", minutes: $end)
         } label: {
-            RowLabel(.workingHours, detail: ScheduleLimits.timeOfDay(end) <= ScheduleLimits.timeOfDay(start)
-                ? "Ends the next day." : nil)
+            RowLabel(.workingHours, detail: detail)
         }
         .onChange(of: start) { apply() }
         .onChange(of: end) { apply() }
+    }
+
+    private var detail: String? {
+        let start = ScheduleLimits.timeOfDay(start), end = ScheduleLimits.timeOfDay(end)
+        return start == end ? "Lasts 24 hours." : end < start ? "Ends the next day." : nil
     }
 }
 

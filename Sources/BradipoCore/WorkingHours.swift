@@ -31,6 +31,7 @@ public struct DaysOfWeek: OptionSet, Sendable {
 ///
 /// The times are on the wall clock, so the hours are an hour shorter or longer when the clocks change during them.
 /// A time the clocks skip takes effect when they jump past it, and a time they repeat takes effect the first time.
+/// When the clocks skip both times at once, there are no hours that day.
 public struct WorkingHours: Equatable, Sendable {
     /// Minutes after midnight.
     public var start: Int
@@ -54,28 +55,17 @@ public struct WorkingHours: Equatable, Sendable {
         }
     }
 
-    /// The first moment after `date` at which the hours begin or end. It's nil if they never do: with no days,
-    /// or when every day's hours begin as the day before's end.
-    public func nextChange(after date: Date, in calendar: Calendar) -> Date? {
+    /// The first moment after `date` at which the hours begin or end, or nil if there are none in the next two weeks.
+    /// Where one day's hours end as the next day's begin, nothing changes at the boundary.
+    public func nextBoundary(after date: Date, in calendar: Calendar) -> Date? {
         let today = calendar.startOfDay(for: date)
-        // The end of the hours that `date` is in, once they're found.
-        var end: Date?
-        // The hours that began yesterday can still be going on, and with a single day chosen, the next begin a week
-        // after today's.
-        for offset in -1...7 {
-            let hours = calendar.date(byAdding: .day, value: offset, to: today)
-                .flatMap { interval(startingOn: $0, in: calendar) }
-            if let current = end {
-                // Hours that begin as the earlier ones end carry them on.
-                guard let hours, hours.lowerBound <= current else { return current }
-                end = hours.upperBound
-            } else if let hours, hours.contains(date) {
-                end = hours.upperBound
-            } else if let hours, hours.lowerBound > date {
-                return hours.lowerBound
-            }
-        }
-        return nil
+        // The hours that began yesterday can still be going on. A single chosen day can have no hours one week,
+        // when a clock change swallows them, so the search reaches the week after.
+        return (-1...14).compactMap { calendar.date(byAdding: .day, value: $0, to: today) }
+            .compactMap { interval(startingOn: $0, in: calendar) }
+            .flatMap { [$0.lowerBound, $0.upperBound] }
+            .filter { $0 > date }
+            .min()
     }
 
     /// The hours that start on the day of `day`, if it's one of the chosen days.
@@ -83,13 +73,29 @@ public struct WorkingHours: Equatable, Sendable {
         guard days.contains(DaysOfWeek(weekday: calendar.component(.weekday, from: day))),
               let endDay = end > start ? day : calendar.date(byAdding: .day, value: 1, to: day),
               let from = Self.moment(start, on: day, in: calendar),
-              let to = Self.moment(end, on: endDay, in: calendar) else { return nil }
+              let to = Self.moment(end, on: endDay, in: calendar), from < to else { return nil }
         return from..<to
     }
 
-    /// When the clock on that day first shows the time, or jumps past it.
+    /// The first moment of that day at which the clock shows the time or later, or nil if the day ends first.
+    ///
+    /// `Calendar.date(bySettingHour:…)` can't stand in: for a time the clocks skip, it can answer with a moment on
+    /// a later day, such as the Monday after Lord Howe Island's clocks jump from 2:00 to 2:30 on a Sunday.
     private static func moment(_ minutes: Int, on day: Date, in calendar: Calendar) -> Date? {
-        calendar.date(bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: day,
-                      matchingPolicy: .nextTime, repeatedTimePolicy: .first)
+        guard let dayInterval = calendar.dateInterval(of: .day, for: day) else { return nil }
+        let target = TimeInterval(minutes * 60)
+        var from = dayInterval.start
+        while from < dayInterval.end {
+            // Until the clocks change, the clock moves on with time, so it shows the time that long after `from`.
+            // When it already shows a later time, the clocks jumped past the time at `from`.
+            let clock = calendar.dateComponents([.hour, .minute, .second], from: from)
+            let shown = TimeInterval((clock.hour ?? 0) * 3600 + (clock.minute ?? 0) * 60 + (clock.second ?? 0))
+            let moment = from.addingTimeInterval(max(0, target - shown))
+            guard let change = calendar.timeZone.nextDaylightSavingTimeTransition(after: from), change <= moment else {
+                return moment < dayInterval.end ? moment : nil
+            }
+            from = change
+        }
+        return nil
     }
 }

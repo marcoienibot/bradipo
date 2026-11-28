@@ -126,3 +126,10 @@ private typealias Place = SettingsSearch.Place
     #expect(navigation.sections.map(\.place.section) == [.rhythm, .workingHours, .breakScreen, .sounds, .meetings, .general])
     #expect(navigation.settings.isEmpty)
 }
+
+@Test func typingHoursShowsTheWorkingHoursSection() {
+    var navigation = SettingsNavigation()
+    // "Hours" starts a word of the section's title, so the section is the first result rather than a setting.
+    navigation.query = "hours"
+    #expect(navigation.selection == Place(section: .workingHours))
+}

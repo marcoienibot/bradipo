@@ -111,10 +111,3 @@ private func highlights(of query: String, in title: String) -> [String]? {
         == [.workingHoursOnly, .workingHours, .workingDays])
     #expect(SettingsSearch.results(for: "weekends").settings.map(\.place.setting) == [.workingDays])
 }
-
-@Test func searchForHoursOpensTheWorkingHoursSection() {
-    // "Hours" starts a word of the section's title, so the section is listed first and opens as someone types.
-    let results = SettingsSearch.results(for: "hours")
-    #expect(results.sections.map(\.place.section) == [.workingHours])
-    #expect(results.settings.map(\.place.setting) == [.workingHoursOnly, .workingHours])
-}
