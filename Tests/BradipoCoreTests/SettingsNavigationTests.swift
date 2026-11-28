@@ -86,12 +86,37 @@ private typealias Place = SettingsSearch.Place
     #expect(navigation.selection == Place(section: .sounds, setting: .startSound))
 }
 
-@Test func arrowKeysDoNothingWhileTheSearchFindsNothing() {
+@Test func arrowKeysChooseNothingWhileTheSearchFindsNothing() {
     var navigation = SettingsNavigation()
+    navigation.query = "glow"
     navigation.query = "glowxyz"
-    navigation.move(by: 1)
+    // The form keeps showing the glow setting, which an arrow key mustn't turn into a choice.
+    let chose = navigation.move(by: 1)
+    #expect(!chose)
     navigation.query = ""
     #expect(navigation.selection == Place(section: .rhythm))
+}
+
+@Test func aQueryOfSpacesGoesBackLikeAnEmptyOne() {
+    var navigation = SettingsNavigation()
+    navigation.choose(Place(section: .meetings))
+    navigation.query = "glow"
+    navigation.query = "   "
+    #expect(navigation.selection == Place(section: .meetings))
+    // The sidebar lists the sections again, not the results of a search for spaces.
+    #expect(navigation.settings.isEmpty)
+    #expect(navigation.sections.count == 5)
+}
+
+@Test func typingMoreAfterAChoiceShowsTheNewBestMatchButGoesBackToTheChoice() {
+    var navigation = SettingsNavigation()
+    navigation.query = "sound"
+    navigation.move(by: 1)
+    // Typing previews again. It doesn't replace the section that the arrow key chose.
+    navigation.query = "glow"
+    #expect(navigation.selection == Place(section: .breakScreen, setting: .glowIntensity))
+    navigation.query = ""
+    #expect(navigation.selection == Place(section: .sounds))
 }
 
 @Test func withoutASearchTheSidebarListsEverySection() {
