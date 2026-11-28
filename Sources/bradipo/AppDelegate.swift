@@ -58,7 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         clock = BreakTimer(workDuration: defaults.duration(forKey: DefaultsKey.workSeconds),
                            breakDuration: defaults.duration(forKey: DefaultsKey.breakSeconds),
                            longBreakDuration: defaults.duration(forKey: DefaultsKey.longBreakSeconds),
-                           shortBreaksBeforeLongBreak: max(1, defaults.integer(forKey: DefaultsKey.shortBreaksBeforeLongBreak)),
+                           shortBreaksBeforeLongBreak: defaults.shortBreaks,
                            longBreaksEnabled: defaults.bool(forKey: DefaultsKey.longBreaksEnabled),
                            now: ProcessInfo.processInfo.systemUptime)
         super.init()
@@ -327,7 +327,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         clock.configure(workDuration: defaults.duration(forKey: DefaultsKey.workSeconds),
                         breakDuration: defaults.duration(forKey: DefaultsKey.breakSeconds),
                         longBreakDuration: defaults.duration(forKey: DefaultsKey.longBreakSeconds),
-                        shortBreaksBeforeLongBreak: max(1, defaults.integer(forKey: DefaultsKey.shortBreaksBeforeLongBreak)),
+                        shortBreaksBeforeLongBreak: defaults.shortBreaks,
                         longBreaksEnabled: defaults.bool(forKey: DefaultsKey.longBreaksEnabled), at: now)
         tick()
     }
@@ -335,7 +335,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 private extension UserDefaults {
     func duration(forKey key: String) -> TimeInterval {
-        TimeInterval(min(5999, max(1, integer(forKey: key))))
+        TimeInterval(ScheduleLimits.seconds(integer(forKey: key)))
+    }
+
+    var shortBreaks: Int {
+        ScheduleLimits.shortBreaks(integer(forKey: DefaultsKey.shortBreaksBeforeLongBreak))
     }
 }
 

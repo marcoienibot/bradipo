@@ -17,6 +17,8 @@ final class LoginItem {
     }
 
     func toggle() {
+        // The status shown can be older than a change made in System Settings.
+        refresh()
         defer { refresh() }
         do {
             if status == .enabled {

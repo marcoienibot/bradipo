@@ -7,8 +7,6 @@ import UniformTypeIdentifiers
 struct SettingRow: View {
     let setting: Setting
     let host: SettingsHost
-    @AppStorage(DefaultsKey.longBreaksEnabled) private var longBreaks = false
-    @AppStorage(DefaultsKey.deferBreaksDuringMeetings) private var defersBreaks = false
 
     var body: some View {
         switch setting {
@@ -21,11 +19,12 @@ struct SettingRow: View {
         case .longBreaks:
             SavedToggle(setting: setting, key: DefaultsKey.longBreaksEnabled, apply: host.apply)
         case .longBreakLength:
-            DurationPicker(setting: setting, key: DefaultsKey.longBreakSeconds,
-                           presets: [5, 10, 15, 20, 30].map { $0 * 60 }, apply: host.apply)
-                .disabled(!longBreaks)
+            LongBreakRow {
+                DurationPicker(setting: setting, key: DefaultsKey.longBreakSeconds,
+                               presets: [5, 10, 15, 20, 30].map { $0 * 60 }, apply: host.apply)
+            }
         case .longBreakFrequency:
-            ShortBreakCount(apply: host.apply).disabled(!longBreaks)
+            LongBreakRow { ShortBreakCount(apply: host.apply) }
         case .showBanner:
             SavedToggle(setting: setting, key: DefaultsKey.showBreakBanner, apply: host.apply)
         case .bannerPlacement:
@@ -43,7 +42,7 @@ struct SettingRow: View {
         case .deferDuringMeetings:
             SavedToggle(setting: setting, key: DefaultsKey.deferBreaksDuringMeetings, apply: host.apply)
         case .ignoredApps:
-            IgnoredApps(ignored: host.ignoredApps).disabled(!defersBreaks)
+            IgnoredApps(ignored: host.ignoredApps)
         case .launchAtLogin:
             LoginToggle(login: host.login)
         case .version:
@@ -117,6 +116,16 @@ private enum About {
     }
 }
 
+/// Greys out a row that only matters while long breaks are on.
+private struct LongBreakRow<Content: View>: View {
+    @ViewBuilder let content: Content
+    @AppStorage(DefaultsKey.longBreaksEnabled) private var longBreaks = false
+
+    var body: some View {
+        content.disabled(!longBreaks)
+    }
+}
+
 private struct SavedToggle: View {
     let setting: Setting
     let apply: () -> Void
@@ -141,13 +150,14 @@ private struct DurationPicker: View {
     let setting: Setting
     let presets: [Int]
     let apply: () -> Void
-    @AppStorage private var seconds: Int
+    @AppStorage private var saved: Int
+    private var seconds: Int { ScheduleLimits.seconds(saved) }
 
     init(setting: Setting, key: String, presets: [Int], apply: @escaping () -> Void) {
         self.setting = setting
         self.presets = presets
         self.apply = apply
-        _seconds = AppStorage(wrappedValue: 0, key)
+        _saved = AppStorage(wrappedValue: 0, key)
     }
 
     var body: some View {
@@ -166,7 +176,7 @@ private struct DurationPicker: View {
     }
 
     private func save(_ value: Int) {
-        seconds = value
+        saved = value
         apply()
     }
 
@@ -183,16 +193,21 @@ private struct DurationPicker: View {
 
 private struct ShortBreakCount: View {
     let apply: () -> Void
-    @AppStorage(DefaultsKey.shortBreaksBeforeLongBreak) private var count = 0
+    @AppStorage(DefaultsKey.shortBreaksBeforeLongBreak) private var saved = 0
 
     var body: some View {
+        let count = Binding { ScheduleLimits.shortBreaks(saved) } set: { saved = ScheduleLimits.shortBreaks($0) }
         LabeledContent {
-            Text(count, format: .number).monospacedDigit()
-            Stepper(Setting.longBreakFrequency.title, value: $count, in: 1...Int.max).labelsHidden()
+            // The field takes any count at once, where the stepper needs a click for each step.
+            TextField(Setting.longBreakFrequency.title, value: count, format: .number)
+                .labelsHidden()
+                .multilineTextAlignment(.trailing)
+                .frame(width: 56)
+            Stepper(Setting.longBreakFrequency.title, value: count, in: 1...Int.max).labelsHidden()
         } label: {
             RowLabel(.longBreakFrequency)
         }
-        .onChange(of: count) { apply() }
+        .onChange(of: saved) { apply() }
     }
 }
 
@@ -202,18 +217,14 @@ private struct BannerReset: View {
 
     var body: some View {
         LabeledContent {
-            Button("Reset on All Displays") {
-                host.overlay.resetBanners()
-                refresh()
-            }
-            .disabled(!canReset)
+            Button("Reset on All Displays", action: host.overlay.resetBanners)
+                .disabled(!canReset)
         } label: {
             RowLabel(.bannerPlacement)
         }
         .onAppear(perform: refresh)
-        .onReceive(windowFocus) { _ in refresh() }
-        // The banner can be dragged during a break while this window stays in front.
-        .onHover { _ in refresh() }
+        // A banner can be dragged during a break while this window stays in front.
+        .onReceive(NotificationCenter.default.publisher(for: .bannerPlacementChanged)) { _ in refresh() }
     }
 
     private func refresh() {
@@ -262,13 +273,22 @@ private struct GlowSlider: View {
 /// The apps using the microphone now and the ignored ones, each with a switch that ignores it.
 private struct IgnoredApps: View {
     @Binding var ignored: [String: String]
+    @AppStorage(DefaultsKey.deferBreaksDuringMeetings) private var defersBreaks = false
     @ViewState private var apps = IgnoredAppsSections(recording: [], ignored: [])
 
     var body: some View {
+        Group {
+            rows
+        }
+        .disabled(!defersBreaks)
+    }
+
+    @ViewBuilder private var rows: some View {
         RowLabel(.ignoredApps)
             .frame(maxWidth: .infinity, alignment: .leading)
             .onAppear(perform: refresh)
             .onReceive(windowFocus) { _ in refresh() }
+            .onChange(of: defersBreaks) { refresh() }
         ForEach(apps.recording + apps.ignored, id: \.self) { app in
             Toggle(isOn: Binding { ignored[app.id] != nil } set: { isIgnored in
                 ignored[app.id] = isIgnored ? app.name : nil
@@ -281,17 +301,18 @@ private struct IgnoredApps: View {
                 }
             }
         }
-        if apps.recording.isEmpty && apps.ignored.isEmpty {
+        if defersBreaks && apps.recording.isEmpty && apps.ignored.isEmpty {
             Text("No apps are using the microphone")
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    /// Reading every audio client is costly, so the list is read when it's shown rather than kept current.
+    /// Reading every audio client is costly, so the list is read when it's shown rather than kept current,
+    /// and not at all while nothing can be ignored.
     private func refresh() {
         let saved = ignored.map { RecordingApp(id: $0.key, name: $0.value) }
-        apps = IgnoredAppsSections(recording: MicrophoneMonitor.recordingApps(), ignored: saved)
+        apps = IgnoredAppsSections(recording: defersBreaks ? MicrophoneMonitor.recordingApps() : [], ignored: saved)
     }
 }
 

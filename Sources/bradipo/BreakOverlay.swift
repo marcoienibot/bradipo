@@ -80,6 +80,7 @@ final class BreakOverlay: NSObject {
 
     func resetBanners() {
         BreakCardPlacement.resetAll()
+        NotificationCenter.default.post(name: .bannerPlacementChanged, object: nil)
         for panel in banners {
             if let card = panel.contentView as? CardHostingView, let placement = card.placement {
                 panel.setFrame(placement.savedFrame, display: true)
@@ -163,6 +164,11 @@ final class BreakOverlay: NSObject {
     private func refreshBannerCursor() {
         for panel in banners { (panel.contentView as? CardHostingView)?.scheduleCursorUpdate() }
     }
+}
+
+extension Notification.Name {
+    /// Posted after a banner's saved size or position changes: when a drag ends, and after a reset.
+    static let bannerPlacementChanged = Notification.Name("bannerPlacementChanged")
 }
 
 private extension NSScreen {
@@ -377,6 +383,7 @@ private final class CardHostingView: NSHostingView<BreakCard> {
         guard let grab else { return }
         updateDrag(at: event.locationInWindow)
         self.grab = nil
+        if isDragging { NotificationCenter.default.post(name: .bannerPlacementChanged, object: nil) }
         if !isDragging, grab.handle == nil, window?.isVisible == true, bounds.contains(convert(event.locationInWindow, from: nil)) {
             rootView.onEndBreak()
         } else {
