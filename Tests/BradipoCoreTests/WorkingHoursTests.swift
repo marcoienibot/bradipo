@@ -187,6 +187,16 @@ private let nineToFive = WorkingHours(start: 9 * 60, end: 17 * 60, days: .monday
         == moment("2027-03-28T00:00:00-01:00"))
 }
 
+@Test func hoursThatStartAtATimeTheDaySkipsStartWithTheNextDay() {
+    // Nuuk's Saturday 27 March 2027 ends at 23:00, so 23:30 never shows that day. Saturday's hours still happen,
+    // starting as the clocks jump into Sunday.
+    let nuuk = calendar(in: "America/Nuuk")
+    let hours = WorkingHours(start: 23 * 60 + 30, end: 6 * 60, days: .saturday)
+    #expect(hours.nextBoundary(after: moment("2027-03-27T20:00:00-02:00"), in: nuuk)
+        == moment("2027-03-28T00:00:00-01:00"))
+    #expect(hours.contains(moment("2027-03-28T03:00:00-01:00"), in: nuuk))
+}
+
 @Test func hoursFollowAChangeOfStandardTime() {
     // On 1 May 2016, Caracas moved from UTC−4:30 to UTC−4:00, and its clocks went from 2:30 to 3:00. That's no
     // daylight saving time, yet 3:00 is the moment of the change, not half an hour later.

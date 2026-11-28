@@ -305,9 +305,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// or "Monday at 9:00" later on.
     private func outsideWorkingHoursDescription(back start: Date?, from date: Date) -> String {
         guard let start else { return "Outside working hours" }
-        // By calendar day: counting days between their starts goes wrong when a day starts late, such as at 1:00
-        // after a skipped midnight.
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: date)
+        // Tomorrow begins as today ends. Counting days between their starts goes wrong when a day starts late, such as
+        // at 1:00 after a skipped midnight, and adding a day to `date` can land in a skipped hour on the day after.
+        let tomorrow = calendar.dateInterval(of: .day, for: date)?.end
         let day = if calendar.isDate(start, inSameDayAs: date) {
             ""
         } else if let tomorrow, calendar.isDate(start, inSameDayAs: tomorrow) {
