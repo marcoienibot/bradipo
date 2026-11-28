@@ -32,13 +32,13 @@ public enum SettingsSearch {
     /// The window opens the first result as someone types. So a section is only listed when the query starts
     /// the words of its title: "in" finds Work interval rather than Meetings.
     public static func results(for query: String) -> (sections: [Hit], settings: [Hit]) {
-        let sections = SettingsSection.allCases.map { Place(section: $0) }
-        let settings = SettingsSection.allCases.flatMap { section in
+        let sections = search(query, in: SettingsSection.allCases.map { Place(section: $0) }, title: \.title)
+            .filter(\.startsWords)
+        let settings = search(query, in: SettingsSection.allCases.flatMap { section in
             section.groups.joined().map { Place(section: section, setting: $0) }
-        }
-        return (search(query, in: sections, title: \.title).filter(\.startsWords).map { Hit(place: $0.item, matches: $0.matches) },
-                search(query, in: settings, title: \.title) { $0.setting?.keywords ?? [] }
-                    .map { Hit(place: $0.item, matches: $0.matches) })
+        }, title: \.title) { $0.setting?.keywords ?? [] }
+        return (sections.map { Hit(place: $0.item, matches: $0.matches) },
+                settings.map { Hit(place: $0.item, matches: $0.matches) })
     }
 
     /// The items that every word of the query finds, in their title or else in one of their keywords,

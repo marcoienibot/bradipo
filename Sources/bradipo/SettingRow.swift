@@ -277,10 +277,7 @@ private struct IgnoredApps: View {
     @ViewState private var apps = IgnoredAppsSections(recording: [], ignored: [])
 
     var body: some View {
-        Group {
-            rows
-        }
-        .disabled(!defersBreaks)
+        rows.disabled(!defersBreaks)
     }
 
     @ViewBuilder private var rows: some View {
