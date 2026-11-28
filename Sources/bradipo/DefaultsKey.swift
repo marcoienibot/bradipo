@@ -11,7 +11,8 @@ enum DefaultsKey {
     static let showBreaksInScreenSharing = "showBreaksInScreenSharing"
     static let breakStartSound = "breakStartSoundEnabled"
     static let breakEndSound = "breakEndSoundEnabled"
-    /// Empty until a sound is chosen, which leaves `BreakSound` playing its default.
+    /// A sound's file name, rather than the name Settings shows. Empty until a sound is chosen, which leaves
+    /// `BreakSound` playing its default.
     static let breakStartSoundName = "breakStartSoundName"
     static let breakEndSoundName = "breakEndSoundName"
     static let deferBreaksDuringMeetings = "pauseDuringMeetings"

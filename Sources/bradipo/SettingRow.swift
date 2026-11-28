@@ -155,23 +155,22 @@ private struct SoundRow: View {
         self.setting = setting
         self.sound = sound
         _isOn = AppStorage(wrappedValue: false, sound.isOnKey)
-        _saved = AppStorage(wrappedValue: "", sound.nameKey)
+        _saved = AppStorage(wrappedValue: "", sound.fileNameKey)
     }
 
     var body: some View {
         LabeledContent {
-            if let chosen = sound.name(saved: saved) {
-                Picker(setting.title, selection: Binding { chosen } set: { name in
-                    saved = name
-                    NSSound(named: name)?.play()
-                }) {
-                    ForEach(BreakSound.choices, id: \.self) { Text($0).tag($0) }
-                }
-                .labelsHidden()
-                .fixedSize()
-                // Like the long-break rows, the choice is greyed out while it doesn't matter.
-                .disabled(!isOn)
+            // Two rows have this pop-up, and VoiceOver can read its label without its row's.
+            Picker("\(setting.title), sound", selection: Binding { sound.fileName(saved: saved) } set: { fileName in
+                saved = fileName
+                BreakSound.play(fileName)
+            }) {
+                ForEach(AlertSound.all, id: \.fileName) { Text($0.title).tag($0.fileName) }
             }
+            .labelsHidden()
+            .fixedSize()
+            // Like the long-break rows, the choice is greyed out while it doesn't matter.
+            .disabled(!isOn)
             // A form only draws a row's own toggle as a switch, and this one would otherwise be a checkbox.
             Toggle(setting.title, isOn: $isOn)
                 .toggleStyle(.switch)

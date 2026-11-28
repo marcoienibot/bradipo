@@ -195,9 +195,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let state = activity.sample(detectMeetings: deferBreaksDuringMeetings, fresh: fresh || clock.isBreakDue(at: time))
         let transition = clock.tick(at: time, activity: state)
         render()
-        if let sound = breakSounds.first(where: { $0.transition == transition })?.sound, defaults.bool(forKey: sound.isOnKey),
-           let name = sound.name(saved: defaults.string(forKey: sound.nameKey)) {
-            NSSound(named: name)?.play()
+        if let sound = breakSounds.first(where: { $0.transition == transition })?.sound, defaults.bool(forKey: sound.isOnKey) {
+            BreakSound.play(sound.fileName(saved: defaults.string(forKey: sound.fileNameKey)))
         }
     }
 

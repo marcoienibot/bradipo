@@ -1,25 +1,32 @@
+import AppKit
 import BradipoCore
-import Foundation
 
 /// A sound that marks a break starting or finishing, which Settings turns on and chooses.
 struct BreakSound {
     let isOnKey: String
-    let nameKey: String
-    let defaultName: String
+    let fileNameKey: String
+    let defaultFileName: String
 
-    static let start = Self(isOnKey: DefaultsKey.breakStartSound, nameKey: DefaultsKey.breakStartSoundName,
-                            defaultName: "Purr")
-    static let end = Self(isOnKey: DefaultsKey.breakEndSound, nameKey: DefaultsKey.breakEndSoundName,
-                          defaultName: "Glass")
+    static let start = Self(isOnKey: DefaultsKey.breakStartSound, fileNameKey: DefaultsKey.breakStartSoundName,
+                            defaultFileName: AlertSound.breakStartDefault)
+    static let end = Self(isOnKey: DefaultsKey.breakEndSound, fileNameKey: DefaultsKey.breakEndSoundName,
+                          defaultFileName: AlertSound.breakEndDefault)
 
-    /// The macOS alert sounds, by the names `NSSound(named:)` takes. They're read from the folder rather than listed
-    /// here, so Settings doesn't offer a sound that a later macOS dropped.
-    static let choices = ((try? FileManager.default.contentsOfDirectory(atPath: "/System/Library/Sounds")) ?? [])
-        .map { ($0 as NSString).deletingPathExtension }
-        .sorted()
+    @MainActor private static var lastPlayed: NSSound?
 
-    /// The sound that plays for a saved name. Settings shows the same one as chosen.
-    func name(saved: String?) -> String? {
-        AlertSound.resolve(saved, default: defaultName, among: Self.choices)
+    /// The file name of the sound that plays for a saved one. Settings shows the same one as chosen.
+    func fileName(saved: String?) -> String {
+        AlertSound.resolve(saved, default: defaultFileName)
+    }
+
+    /// Plays a sound from the start, stopping the one played last. `NSSound(named:)` hands back one shared sound per
+    /// name, which ignores `play()` while it's still playing, and stopping it first makes it start over. Otherwise a
+    /// break shorter than its sound would skip the end sound when it's the same as the start one, and a sound
+    /// previewed in Settings could swallow a break's. Stopping the last one also keeps quick previews from playing
+    /// over each other, as System Settings does.
+    @MainActor static func play(_ fileName: String) {
+        lastPlayed?.stop()
+        lastPlayed = NSSound(named: fileName)
+        lastPlayed?.play()
     }
 }
