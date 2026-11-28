@@ -26,13 +26,12 @@ import Testing
     #expect(AlertSound.all.first { $0.fileName == AlertSound.breakEndDefault }?.title == "Crystal")
 }
 
-@Test func everyAlertSoundIsASoundInTheSystemFolder() {
+@Test func everyAlertSoundIsASoundInTheSystemFolder() throws {
     // The table is copied by hand from the system, and NSSound looks a sound up by its file name, so a misspelled
-    // one, such as Sosume, would play nothing while Settings showed it as chosen.
+    // one, such as Sosume, would play nothing while Settings showed it as chosen. NSSound also matches the name's
+    // case, which the startup disk ignores, so the test reads the folder's names rather than asking if a file exists.
+    let files = Set(try FileManager.default.contentsOfDirectory(atPath: "/System/Library/Sounds"))
     for sound in AlertSound.all {
-        #expect(
-            FileManager.default.fileExists(atPath: "/System/Library/Sounds/\(sound.fileName).aiff"),
-            "No system sound is named \(sound.fileName)"
-        )
+        #expect(files.contains("\(sound.fileName).aiff"), "No system sound is named \(sound.fileName)")
     }
 }
