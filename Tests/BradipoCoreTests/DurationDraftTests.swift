@@ -33,8 +33,9 @@ import Testing
 }
 
 @Test func spacesAroundANumberAreIgnored() {
-    // A pasted number can bring spaces with it.
+    // A pasted number can bring spaces with it, or the line break after it when a whole line is copied.
     #expect(DurationDraft(minutes: " 5 ", seconds: "0").duration == 300)
+    #expect(DurationDraft(minutes: "5\n", seconds: "0").duration == 300)
 }
 
 @Test func zeroIsNotALength() {

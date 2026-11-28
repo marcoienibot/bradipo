@@ -30,7 +30,7 @@ public struct DurationDraft: Equatable, Sendable {
     }
 
     private static func number(_ text: String, in range: ClosedRange<Int>) -> Int? {
-        let text = text.trimmingCharacters(in: .whitespaces)
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let number = text.isEmpty ? 0 : Int(text) else { return nil }
         return min(range.upperBound, max(range.lowerBound, number))
     }
