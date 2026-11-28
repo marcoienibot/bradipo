@@ -13,10 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let pause = NSMenuItem()
     /// Both are off until turned on in Settings. They mark only the changes `BreakTimer.tick` reports, so starting or
     /// stopping a break from the menu or banner, or time away ending one, plays nothing.
-    private let breakSounds: [(transition: BreakTransition, key: String, sound: NSSound.Name)] = [
-        (.started, DefaultsKey.breakStartSound, "Purr"),
-        (.finished, DefaultsKey.breakEndSound, "Glass"),
-    ]
+    private let breakSounds: [(transition: BreakTransition, sound: BreakSound)] = [(.started, .start), (.finished, .end)]
     private lazy var settings = SettingsWindow(host: SettingsHost(
         overlay: overlay, login: LoginItem(), updater: Updater(),
         ignoredApps: Binding { @MainActor [weak self] in self?.ignoredApps ?? [:] } set: { @MainActor [weak self] in
@@ -198,8 +195,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let state = activity.sample(detectMeetings: deferBreaksDuringMeetings, fresh: fresh || clock.isBreakDue(at: time))
         let transition = clock.tick(at: time, activity: state)
         render()
-        if let setting = breakSounds.first(where: { $0.transition == transition }), defaults.bool(forKey: setting.key) {
-            NSSound(named: setting.sound)?.play()
+        if let sound = breakSounds.first(where: { $0.transition == transition })?.sound, defaults.bool(forKey: sound.isOnKey),
+           let name = sound.name(saved: defaults.string(forKey: sound.nameKey)) {
+            NSSound(named: name)?.play()
         }
     }
 
