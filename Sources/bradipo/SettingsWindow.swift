@@ -29,4 +29,16 @@ final class SettingsWindow: NSWindow {
         setContentSize(content.view.fittingSize)
         center()
     }
+
+    /// Typing right after Settings opens searches, as in System Settings.
+    override func makeKeyAndOrderFront(_ sender: Any?) {
+        if !isVisible, let search = contentView?.firstSubview(of: NSSearchField.self) { makeFirstResponder(search) }
+        super.makeKeyAndOrderFront(sender)
+    }
+}
+
+private extension NSView {
+    func firstSubview<View: NSView>(of type: View.Type) -> View? {
+        subviews.lazy.compactMap { ($0 as? View) ?? $0.firstSubview(of: type) }.first
+    }
 }

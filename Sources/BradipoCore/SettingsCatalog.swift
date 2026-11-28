@@ -55,6 +55,25 @@ public enum Setting: CaseIterable, Hashable, Sendable {
         }
     }
 
+    /// Other words that find the setting in a search: what its control says, and what the menu called it
+    /// before the settings moved to a window.
+    public var keywords: [String] {
+        switch self {
+        case .workInterval, .shortBreakLength, .longBreakLength: ["Custom"]
+        case .longBreakFrequency: ["Long break after", "Long break frequency"]
+        case .bannerPlacement: ["Reset on All Displays"]
+        case .accentColor: ["Restore Default Green"]
+        case .startSound: ["Play Sound When Breaks Start"]
+        case .endSound: ["Play Sound When Breaks End"]
+        case .deferDuringMeetings: ["Microphone", "Camera"]
+        case .ignoredApps: ["Microphone"]
+        case .version: ["About bradipo"]
+        case .updates: ["Check for Updates"]
+        case .sourceCode: ["About bradipo", "GitHub", "Commit"]
+        default: []
+        }
+    }
+
     /// Shown under the title where the title alone doesn't say what the setting does.
     public var detail: String? {
         switch self {
