@@ -42,10 +42,28 @@ final class SettingsWindow: NSWindow {
         makeFirstResponder(nil)
         super.close()
     }
+
+    /// A click outside the text fields takes the keyboard from a setting's field, so the field saves what it shows.
+    /// A row's title, the space around the rows and SwiftUI's pop-ups don't take the keyboard, so the field would
+    /// keep editing. The search field keeps the keyboard, so typing and Esc still work on the search.
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown, let editor = firstResponder as? NSText, !(editor.delegate is NSSearchField),
+           let view = contentView?.superview?.hitTest(event.locationInWindow), !view.takesTyping {
+            makeFirstResponder(nil)
+        }
+        super.sendEvent(event)
+    }
 }
 
 private extension NSView {
     func firstSubview<View: NSView>(of type: View.Type) -> View? {
         subviews.lazy.compactMap { ($0 as? View) ?? $0.firstSubview(of: type) }.first
+    }
+
+    /// Whether this is part of a text field that a click puts the keyboard in, or of the text view editing one.
+    var takesTyping: Bool {
+        sequence(first: self, next: \.superview).contains {
+            $0 is NSText || ($0 as? NSTextField)?.acceptsFirstResponder == true
+        }
     }
 }

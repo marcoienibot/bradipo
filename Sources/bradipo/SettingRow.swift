@@ -143,7 +143,7 @@ private struct SavedToggle: View {
     }
 }
 
-/// A pop-up of preset lengths, with fields beside it for any other length.
+/// A pop-up of preset lengths, with fields beside it to type any other length.
 private struct DurationPicker: View {
     /// Stands for the Custom item, since no length is negative.
     private static let custom = -1
@@ -151,16 +151,17 @@ private struct DurationPicker: View {
     let presets: [Int]
     let apply: () -> Void
     @AppStorage private var saved: Int
-    /// Keeps the fields showing once Custom is chosen or a field takes the keyboard, until a preset is chosen.
-    /// Otherwise typing a preset's length, such as 5:00, and pressing Return would take the fields away mid-edit.
-    @ViewState private var choseCustom = false
+    /// Shows the fields from choosing Custom until Return or leaving both fields saves the length in them,
+    /// or Esc puts them away.
+    @ViewState private var isEditing = false
     /// What the fields show. They edit text rather than numbers: a number field can keep showing what was typed,
     /// such as 120 held to 99, when the number it stands for didn't change.
     @ViewState private var draft = DurationDraft(0)
     @FocusState private var focus: Field?
     @Environment(\.isEnabled) private var isEnabled
     private var seconds: Int { ScheduleLimits.seconds(saved) }
-    private var isCustom: Bool { choseCustom || !presets.contains(seconds) }
+    /// The presets, with a saved length that isn't one among them, so the pop-up shows what's saved.
+    private var lengths: [Int] { presets.contains(seconds) ? presets : (presets + [seconds]).sorted() }
 
     private enum Field { case minutes, seconds }
 
@@ -173,7 +174,7 @@ private struct DurationPicker: View {
 
     var body: some View {
         LabeledContent {
-            if isCustom {
+            if isEditing {
                 HStack(spacing: 4) {
                     // Three rows have these fields, and VoiceOver can read a field's label without its row's.
                     field("\(setting.title), minutes", text: $draft.minutes, focus: .minutes)
@@ -181,11 +182,11 @@ private struct DurationPicker: View {
                     field("\(setting.title), seconds", text: $draft.seconds, focus: .seconds)
                     unit("sec")
                 }
+                // Esc puts the fields away without saving them, instead of ending a search in the sidebar.
+                .onExitCommand { isEditing = false }
             }
-            Picker(setting.title, selection: Binding { isCustom ? Self.custom : seconds } set: { choose($0) }) {
-                ForEach(presets, id: \.self) { value in
-                    Text(value.isMultiple(of: 60) ? "\(value / 60) min" : "\(value) sec").tag(value)
-                }
+            Picker(setting.title, selection: Binding { isEditing ? Self.custom : seconds } set: { choose($0) }) {
+                ForEach(lengths, id: \.self) { Text(Self.title($0)).tag($0) }
                 Divider()
                 Text("Custom").tag(Self.custom)
             }
@@ -194,14 +195,22 @@ private struct DurationPicker: View {
         } label: {
             RowLabel(setting)
         }
-        .onChange(of: seconds, initial: true) { draft = DurationDraft(seconds) }
-        // Moving between the two fields keeps editing the same length, so only leaving both saves it.
+        // Moving between the two fields keeps editing the same length, so only leaving both confirms it.
         .onChange(of: focus) {
-            if focus == nil { commit() } else { choseCustom = true }
+            if focus == nil { commit() }
         }
         // A click on another section moves the keyboard and swaps the form in the same event, so the row
         // goes away before it hears that its fields lost the keyboard.
         .onDisappear(perform: commit)
+    }
+
+    /// A length in the units of the fields, such as "7 min 30 sec".
+    private static func title(_ length: Int) -> String {
+        switch (length / 60, length % 60) {
+        case let (0, seconds): "\(seconds) sec"
+        case let (minutes, 0): "\(minutes) min"
+        case let (minutes, seconds): "\(minutes) min \(seconds) sec"
+        }
     }
 
     /// A grouped form draws a text field without a border, which wouldn't look like it takes typing.
@@ -222,24 +231,27 @@ private struct DurationPicker: View {
 
     private func choose(_ value: Int) {
         if value == Self.custom {
-            choseCustom = true
-            focus = .minutes
+            draft = DurationDraft(seconds)
+            isEditing = true
+            // The keyboard can go to the minutes once the fields are there. Asking in the same update
+            // leaves it nowhere when a click beside the fields has just taken it from them.
+            DispatchQueue.main.async { focus = .minutes }
         } else {
-            choseCustom = false
-            // Saving also shows the preset in the fields. A field can still have the keyboard, and its edit
-            // would otherwise be saved over the preset once the fields go away.
+            // A field can still have the keyboard. Putting the fields away first keeps their edit
+            // from being saved over the preset as they lose it.
+            isEditing = false
             save(value)
         }
     }
 
-    /// Saves what the fields ask for. Something that isn't a length shows the saved one again.
+    /// Saves what the fields ask for and puts them away. Something that isn't a length keeps the saved one.
     private func commit() {
+        guard isEditing else { return }
+        isEditing = false
         save(draft.duration ?? seconds)
     }
 
-    /// Shows a length in the fields, and saves it if it changed.
     private func save(_ value: Int) {
-        draft = DurationDraft(value)
         // Leaving the fields without changing the length, or choosing the preset that's saved,
         // shouldn't touch the timer.
         guard value != seconds else { return }
@@ -390,3 +402,4 @@ private struct LoginToggle: View {
         .onReceive(windowFocus) { _ in login.refresh() }
     }
 }
+
