@@ -9,9 +9,11 @@ final class BreakOverlay: NSObject {
     private var glows: [ReminderPanel] = []
     private var banners: [ReminderPanel] = []
     private var isPreviewingGlow = false
-    @AppStorage("showBreakBanner") private(set) var showsBanner = true
-    /// Off until checked, so people watching a screen share or recording don't see the glow or the banner.
-    @AppStorage("showBreaksInScreenSharing") private(set) var showsInScreenSharing = false
+    private var showsBanner: Bool { UserDefaults.standard.bool(forKey: DefaultsKey.showBreakBanner) }
+    /// Off until turned on, so people watching a screen share or recording don't see the glow or the banner.
+    private var sharingType: NSWindow.SharingType {
+        UserDefaults.standard.bool(forKey: DefaultsKey.showBreaksInScreenSharing) ? .readOnly : .none
+    }
     let intensity = BorderGlowIntensity()
     private var countdown: BreakCountdown?
     private let onEndBreak: () -> Void
@@ -49,17 +51,11 @@ final class BreakOverlay: NSObject {
         updatePanels()
     }
 
-    @objc func toggleBanner() {
-        showsBanner.toggle()
+    /// Applies the saved banner and screen-sharing settings to a break or preview that's on screen.
+    func applySettings() {
         updatePanels()
-    }
-
-    @objc func toggleScreenSharing() {
-        showsInScreenSharing.toggle()
         for panel in glows + banners { panel.sharingType = sharingType }
     }
-
-    private var sharingType: NSWindow.SharingType { showsInScreenSharing ? .readOnly : .none }
 
     func setGlowIntensity(_ value: Double) {
         guard value != intensity.value else { return }
@@ -82,7 +78,7 @@ final class BreakOverlay: NSObject {
         }
     }
 
-    @objc func resetBanners() {
+    func resetBanners() {
         BreakCardPlacement.resetAll()
         for panel in banners {
             if let card = panel.contentView as? CardHostingView, let placement = card.placement {
@@ -125,10 +121,9 @@ final class BreakOverlay: NSObject {
         }
         guard !added.isEmpty else { return }
         // AppKit lists visible windows front to back on the active Space.
-        // Insert each new glow immediately below the backmost editor or break card.
+        // Insert each new glow immediately below the backmost break card.
         let anchor = NSWindow.windowNumbers()?.last { number in
-            NSApp.window(withWindowNumber: number.intValue) is BorderGlowEditor ||
-                banners.contains { $0.windowNumber == number.intValue }
+            banners.contains { $0.windowNumber == number.intValue }
         }
         for panel in added {
             panel.sharingType = sharingType

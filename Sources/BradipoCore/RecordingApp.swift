@@ -50,7 +50,7 @@ public struct RecordingApp: Hashable, Sendable {
     }
 }
 
-/// The sections of the menu that chooses which apps' microphone use doesn't count as a meeting.
+/// The two lists for choosing which apps' microphone use doesn't count as a meeting.
 public struct IgnoredAppsSections: Equatable, Sendable {
     /// Apps using the microphone that aren't ignored, each listed once.
     public let recording: [RecordingApp]

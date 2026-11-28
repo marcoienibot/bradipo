@@ -1,7 +1,6 @@
 import AppKit
 import BradipoCore
 import SwiftUI
-import UniformTypeIdentifiers
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -12,35 +11,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let takeBreak = NSMenuItem()
     private let takeLongBreak = NSMenuItem(title: "Take a Long Break", action: #selector(startBreak), keyEquivalent: "")
     private let pause = NSMenuItem()
-    private let durations: [(menu: NSMenu, key: String, presets: [Int])] = [
-        (NSMenu(title: "Work interval"), "workSeconds", [5, 10, 20, 30, 45, 60].map { $0 * 60 }),
-        (NSMenu(title: "Short break length"), "breakSeconds", [20, 30, 60, 120, 300]),
-        (NSMenu(title: "Long break length"), "longBreakSeconds", [5, 10, 15, 20, 30].map { $0 * 60 }),
+    /// Both are off until turned on in Settings. They mark only the changes `BreakTimer.tick` reports, so starting or
+    /// stopping a break from the menu or banner, or time away ending one, plays nothing.
+    private let breakSounds: [(transition: BreakTransition, key: String, sound: NSSound.Name)] = [
+        (.started, DefaultsKey.breakStartSound, "Purr"),
+        (.finished, DefaultsKey.breakEndSound, "Glass"),
     ]
-    private let longBreaks = NSMenuItem(title: "Long Breaks", action: #selector(toggleLongBreaks), keyEquivalent: "")
-    private var longBreakLength = NSMenuItem()
-    private let breakFrequency = NSMenuItem()
-    private let showBanner = NSMenuItem(title: "Show Break Banner", action: #selector(BreakOverlay.toggleBanner),
-                                        keyEquivalent: "")
-    private let resetBanners = NSMenuItem(title: "Reset Banner Size and Position", action: #selector(BreakOverlay.resetBanners),
-                                          keyEquivalent: "")
-    private let showInScreenSharing = NSMenuItem(title: "Show Breaks in Screen Sharing",
-                                                 action: #selector(BreakOverlay.toggleScreenSharing), keyEquivalent: "")
-    /// Both are off until checked. They mark only the changes `BreakTimer.tick` reports, so starting or stopping
-    /// a break from the menu or banner, or time away ending one, plays nothing.
-    private let breakSounds: [(transition: BreakTransition, key: String, sound: NSSound.Name, item: NSMenuItem)] = [
-        (.started, "breakStartSoundEnabled", "Purr",
-         NSMenuItem(title: "Play Sound When Breaks Start", action: #selector(toggleBreakSound), keyEquivalent: "")),
-        (.finished, "breakEndSoundEnabled", "Glass",
-         NSMenuItem(title: "Play Sound When Breaks End", action: #selector(toggleBreakSound), keyEquivalent: "")),
-    ]
-    private let meetingItem = NSMenuItem()
-    private let ignoredAppsItem = NSMenuItem(title: "Ignored Apps", action: nil, keyEquivalent: "")
-    private let ignoredAppsMenu = NSMenu(title: "Ignored Apps")
-    private let login = LoginItem()
-    private let updater = Updater()
-    private lazy var aboutPanel = AboutPanel()
-    private lazy var glowEditor = BorderGlowEditor(overlay: overlay)
+    private lazy var settings = SettingsWindow(host: SettingsHost(
+        overlay: overlay, login: LoginItem(), updater: Updater(),
+        ignoredApps: Binding { @MainActor [weak self] in self?.ignoredApps ?? [:] } set: { @MainActor [weak self] in
+            self?.ignoredApps = $0
+        },
+        apply: { [weak self] in self?.applySettings() },
+        canResetBanners: { [weak self] in self.map { $0.overlay.canResetBanners(timer: $0.clock) } ?? false }
+    ))
     private lazy var overlay = BreakOverlay { [weak self] in self?.endBreak() }
     private let activity = ActivityMonitor()
     private var timer: Timer?
@@ -51,29 +35,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let pauseSymbol = ClickThroughImageView()
 
     private let defaults = UserDefaults.standard
-    @AppStorage(BreakAccent.defaultsKey) private var accent = BreakAccent.green
-    private var deferBreaksDuringMeetings: Bool { defaults.bool(forKey: "pauseDuringMeetings") }
-    /// Names by identifier, so the menu can list ignored apps that aren't running.
+    private var deferBreaksDuringMeetings: Bool { defaults.bool(forKey: DefaultsKey.deferBreaksDuringMeetings) }
+    /// Names by identifier, so Settings can list ignored apps that aren't running.
     private var ignoredApps: [String: String] {
-        get { defaults.dictionary(forKey: "ignoredMeetingApps")?.compactMapValues { $0 as? String } ?? [:] }
+        get { defaults.dictionary(forKey: DefaultsKey.ignoredMeetingApps)?.compactMapValues { $0 as? String } ?? [:] }
         set {
-            defaults.set(newValue, forKey: "ignoredMeetingApps")
+            defaults.set(newValue, forKey: DefaultsKey.ignoredMeetingApps)
             activity.ignoredMicrophoneApps = Set(newValue.keys)
+            tick()
         }
     }
     private var clock: BreakTimer
     private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
 
     override init() {
-        defaults.register(defaults: ["workSeconds": 20 * 60, "breakSeconds": 20, "pauseDuringMeetings": true,
-                                     "longBreakSeconds": Int(BreakTimer.defaultLongBreakDuration),
-                                     "shortBreaksBeforeLongBreak": BreakTimer.defaultShortBreaksBeforeLongBreak,
-                                     "longBreaksEnabled": true])
-        clock = BreakTimer(workDuration: defaults.duration(forKey: "workSeconds"),
-                           breakDuration: defaults.duration(forKey: "breakSeconds"),
-                           longBreakDuration: defaults.duration(forKey: "longBreakSeconds"),
-                           shortBreaksBeforeLongBreak: max(1, defaults.integer(forKey: "shortBreaksBeforeLongBreak")),
-                           longBreaksEnabled: defaults.bool(forKey: "longBreaksEnabled"),
+        defaults.register(defaults: [
+            DefaultsKey.workSeconds: 20 * 60, DefaultsKey.breakSeconds: 20,
+            DefaultsKey.longBreaksEnabled: true, DefaultsKey.longBreakSeconds: Int(BreakTimer.defaultLongBreakDuration),
+            DefaultsKey.shortBreaksBeforeLongBreak: BreakTimer.defaultShortBreaksBeforeLongBreak,
+            DefaultsKey.showBreakBanner: true, DefaultsKey.deferBreaksDuringMeetings: true,
+        ])
+        clock = BreakTimer(workDuration: defaults.duration(forKey: DefaultsKey.workSeconds),
+                           breakDuration: defaults.duration(forKey: DefaultsKey.breakSeconds),
+                           longBreakDuration: defaults.duration(forKey: DefaultsKey.longBreakSeconds),
+                           shortBreaksBeforeLongBreak: max(1, defaults.integer(forKey: DefaultsKey.shortBreaksBeforeLongBreak)),
+                           longBreaksEnabled: defaults.bool(forKey: DefaultsKey.longBreaksEnabled),
                            now: ProcessInfo.processInfo.systemUptime)
         super.init()
         activity.ignoredMicrophoneApps = Set(ignoredApps.keys)
@@ -147,105 +133,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(takeLongBreak)
         menu.addItem(withTitle: "Restart Timer", action: #selector(restartTimer), keyEquivalent: "").target = self
         menu.addItem(.separator())
-        for setting in durations {
-            let item = addDurations(setting.menu, seconds: setting.presets)
-            if setting.key == "longBreakSeconds" { longBreakLength = item }
-        }
-        longBreaks.target = self
-        menu.insertItem(longBreaks, at: menu.index(of: longBreakLength))
-        breakFrequency.target = self
-        breakFrequency.action = #selector(editBreakFrequency)
-        menu.addItem(breakFrequency)
-        menu.addItem(withTitle: "Accent Color…", action: #selector(chooseAccentColor), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "Border Glow Intensity…", action: #selector(editGlowIntensity),
-                     keyEquivalent: "").target = self
-        showBanner.target = overlay
-        menu.addItem(showBanner)
-        resetBanners.target = overlay
-        menu.addItem(resetBanners)
-        showInScreenSharing.target = overlay
-        menu.addItem(showInScreenSharing)
-        for setting in breakSounds {
-            setting.item.target = self
-            menu.addItem(setting.item)
-        }
+        menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",").target = self
         menu.addItem(.separator())
-        meetingItem.title = "Defer Breaks During Meetings"
-        meetingItem.target = self
-        meetingItem.action = #selector(toggleMeetingDeferral)
-        menu.addItem(meetingItem)
-        ignoredAppsMenu.delegate = self
-        ignoredAppsMenu.autoenablesItems = false
-        ignoredAppsItem.submenu = ignoredAppsMenu
-        menu.addItem(ignoredAppsItem)
-        menu.addItem(login.menuItem)
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "About bradipo", action: #selector(showAbout), keyEquivalent: "").target = self
-        menu.addItem(updater.menuItem)
         let quit = menu.addItem(withTitle: "Quit bradipo", action: #selector(NSApplication.terminate(_:)),
                                 keyEquivalent: "")
         quit.target = NSApp
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
-        if menu === ignoredAppsMenu { return updateIgnoredAppsMenu() }
         // Between break decisions the meeting check can reuse a recent result, which could leave a break action enabled
         // during a meeting that just started.
         update(fresh: true)
-        showBanner.state = overlay.showsBanner ? .on : .off
-        resetBanners.isEnabled = overlay.canResetBanners(timer: clock)
-        showInScreenSharing.state = overlay.showsInScreenSharing ? .on : .off
-        meetingItem.state = deferBreaksDuringMeetings ? .on : .off
-        ignoredAppsItem.isEnabled = deferBreaksDuringMeetings
-        login.refresh()
-        for setting in breakSounds { setting.item.state = defaults.bool(forKey: setting.key) ? .on : .off }
-        longBreaks.state = clock.longBreaksEnabled ? .on : .off
-        for setting in durations {
-            updateDurationMenu(setting.menu, seconds: Int(defaults.duration(forKey: setting.key)))
-        }
-        breakFrequency.title = "Long break after \(shortBreakCountLabel(clock.shortBreaksBeforeLongBreak))…"
-        for item in [longBreakLength, breakFrequency] { item.isEnabled = clock.longBreaksEnabled }
-    }
-
-    /// Lists the apps using the microphone when the submenu opens, since there's no need to track them otherwise.
-    private func updateIgnoredAppsMenu() {
-        let ignored = ignoredApps.map { RecordingApp(id: $0.key, name: $0.value) }
-        let sections = IgnoredAppsSections(recording: MicrophoneMonitor.recordingApps(), ignored: ignored)
-        ignoredAppsMenu.removeAllItems()
-        if !sections.recording.isEmpty {
-            ignoredAppsMenu.addItem(.sectionHeader(title: "Using the Microphone"))
-            for app in sections.recording { ignoredAppsMenu.addItem(ignoredAppItem(app, ignored: false)) }
-        }
-        if !sections.ignored.isEmpty {
-            if !sections.recording.isEmpty { ignoredAppsMenu.addItem(.separator()) }
-            ignoredAppsMenu.addItem(.sectionHeader(title: "Ignored"))
-            for app in sections.ignored { ignoredAppsMenu.addItem(ignoredAppItem(app, ignored: true)) }
-        }
-        if ignoredAppsMenu.items.isEmpty {
-            let empty = ignoredAppsMenu.addItem(withTitle: "No apps are using the microphone", action: nil, keyEquivalent: "")
-            empty.isEnabled = false
-        }
-    }
-
-    private func ignoredAppItem(_ app: RecordingApp, ignored: Bool) -> NSMenuItem {
-        let item = NSMenuItem(title: app.name, action: #selector(toggleIgnoredApp), keyEquivalent: "")
-        item.target = self
-        item.representedObject = app
-        item.state = ignored ? .on : .off
-        // An app that isn't installed, or a daemon without an app, gets the generic program icon.
-        let path = app.id.hasPrefix("/") ? app.id : NSWorkspace.shared.urlForApplication(withBundleIdentifier: app.id)?.path
-        let icon = path.map(NSWorkspace.shared.icon(forFile:)) ?? NSWorkspace.shared.icon(for: .unixExecutable)
-        icon.size = NSSize(width: 16, height: 16)
-        item.image = icon
-        // macOS 27 hides menu item images by default, but here they help tell apps apart.
-        item.preferredImageVisibility = .visible
-        return item
-    }
-
-    @objc private func toggleIgnoredApp(_ sender: NSMenuItem) {
-        guard let app = sender.representedObject as? RecordingApp else { return }
-        ignoredApps[app.id] = sender.state == .off ? app.name : nil
-        tick()
     }
 
     /// A click can't reach the menu bar behind the lock screen or a screen saver, so it clears a dropped unlock or `didstop`.
@@ -285,29 +183,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         button.highlight(true)
         defer { button.highlight(false) }
         menu.popUp(positioning: nil, at: position.pointValue, in: nil)
-    }
-
-    private func addDurations(_ submenu: NSMenu, seconds: [Int]) -> NSMenuItem {
-        for value in seconds {
-            let label = value.isMultiple(of: 60) ? "\(value / 60) min" : "\(value) sec"
-            let item = submenu.addItem(withTitle: label, action: #selector(changeDuration), keyEquivalent: "")
-            item.target = self
-            item.tag = value
-        }
-        submenu.addItem(.separator())
-        submenu.addItem(withTitle: "Custom…", action: #selector(editDuration), keyEquivalent: "").target = self
-        let item = menu.addItem(withTitle: submenu.title, action: nil, keyEquivalent: "")
-        item.submenu = submenu
-        return item
-    }
-
-    private func updateDurationMenu(_ submenu: NSMenu, seconds: Int) {
-        guard let custom = submenu.items.last else { return }
-        let selected = submenu.item(withTag: seconds) ?? custom
-        custom.title = selected === custom ? String(format: "Custom (%d:%02d)…", seconds / 60, seconds % 60) : "Custom…"
-        for item in submenu.items where !item.isSeparatorItem {
-            item.state = item === selected ? .on : .off
-        }
     }
 
     @objc private func tick() {
@@ -429,69 +304,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         tick()
     }
 
-    @objc private func toggleMeetingDeferral() {
-        defaults.set(!deferBreaksDuringMeetings, forKey: "pauseDuringMeetings")
-        tick()
-    }
-
-    @objc private func toggleLongBreaks() {
-        defaults.set(!clock.longBreaksEnabled, forKey: "longBreaksEnabled")
-        applySchedule()
-    }
-
-    @objc private func toggleBreakSound(_ sender: NSMenuItem) {
-        guard let setting = breakSounds.first(where: { $0.item === sender }) else { return }
-        defaults.set(!defaults.bool(forKey: setting.key), forKey: setting.key)
-    }
-
-    @objc private func chooseAccentColor() {
-        // Let the status menu finish returning focus before presenting the panel.
-        perform(#selector(showAccentColorPanel), with: nil, afterDelay: 0, inModes: [.default])
-    }
-
-    @objc private func showAccentColorPanel() {
-        let panel = NSColorPanel.shared
-        panel.title = "Accent Color"
-        // The menu-bar app can still be inactive after it requests activation.
-        panel.hidesOnDeactivate = false
-        panel.showsAlpha = false
-        panel.isContinuous = true
-        panel.color = accent.color
-        panel.setTarget(self)
-        panel.setAction(#selector(changeAccentColor(_:)))
-        panel.accessoryView = NSButton(title: "Restore Default Green", target: self, action: #selector(resetAccentColor))
-        panel.presentFromMenuBar()
-    }
-
-    @objc private func changeAccentColor(_ panel: NSColorPanel) {
-        if let color = BreakAccent(color: panel.color) { accent = color }
-    }
-
-    @objc private func resetAccentColor() {
-        accent = .green
-        NSColorPanel.shared.color = accent.color
-    }
-
-    @objc private func editGlowIntensity() {
-        afterMenuCloses(#selector(presentGlowEditor))
-    }
-
-    @objc private func presentGlowEditor() {
-        glowEditor.presentPreview()
-    }
-
-    @objc private func showAbout() {
-        afterMenuCloses(#selector(presentAboutPanel))
-    }
-
-    private func afterMenuCloses(_ action: Selector, with sender: NSMenuItem? = nil) {
+    @objc private func showSettings() {
         // The status menu restores focus to the previous app as it closes.
         menu.cancelTrackingWithoutAnimation()
-        perform(action, with: sender, afterDelay: 0, inModes: [.default])
+        perform(#selector(presentSettings), with: nil, afterDelay: 0, inModes: [.default])
     }
 
-    @objc private func presentAboutPanel() {
-        aboutPanel.presentFromMenuBar()
+    @objc private func presentSettings() {
+        settings.presentFromMenuBar()
     }
 
     @objc private func togglePause() {
@@ -499,37 +319,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         tick()
     }
 
-    @objc private func editDuration(_ sender: NSMenuItem) {
-        afterMenuCloses(#selector(changeDuration), with: sender)
-    }
-
-    @objc private func changeDuration(_ sender: NSMenuItem) {
-        guard let setting = durations.first(where: { $0.menu === sender.menu }) else { return }
-        let current = Int(defaults.duration(forKey: setting.key))
-        let seconds = sender.tag == 0
-            ? IntervalEditor(title: setting.menu.title, setting: .duration(current)).run() : sender.tag
-        guard let seconds else { return }
-        defaults.set(seconds, forKey: setting.key)
-        applySchedule()
-    }
-
-    @objc private func editBreakFrequency() {
-        afterMenuCloses(#selector(changeBreakFrequency))
-    }
-
-    @objc private func changeBreakFrequency() {
-        let editor = IntervalEditor(title: "Long break frequency", setting: .shortBreakCount(clock.shortBreaksBeforeLongBreak))
-        guard let count = editor.run() else { return }
-        defaults.set(count, forKey: "shortBreaksBeforeLongBreak")
-        applySchedule()
-    }
-
-    private func applySchedule() {
-        clock.configure(workDuration: defaults.duration(forKey: "workSeconds"),
-                        breakDuration: defaults.duration(forKey: "breakSeconds"),
-                        longBreakDuration: defaults.duration(forKey: "longBreakSeconds"),
-                        shortBreaksBeforeLongBreak: max(1, defaults.integer(forKey: "shortBreaksBeforeLongBreak")),
-                        longBreaksEnabled: defaults.bool(forKey: "longBreaksEnabled"), at: now)
+    /// Settings saves a change before asking for it to be applied.
+    private func applySettings() {
+        overlay.applySettings()
+        clock.configure(workDuration: defaults.duration(forKey: DefaultsKey.workSeconds),
+                        breakDuration: defaults.duration(forKey: DefaultsKey.breakSeconds),
+                        longBreakDuration: defaults.duration(forKey: DefaultsKey.longBreakSeconds),
+                        shortBreaksBeforeLongBreak: max(1, defaults.integer(forKey: DefaultsKey.shortBreaksBeforeLongBreak)),
+                        longBreaksEnabled: defaults.bool(forKey: DefaultsKey.longBreaksEnabled), at: now)
         tick()
     }
 }
