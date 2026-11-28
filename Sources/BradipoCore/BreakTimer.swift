@@ -68,8 +68,8 @@ public struct BreakTimer: Sendable {
         // so a due break needs to recheck even without a device notification.
         case .meeting: 0.25
         case nil: timeUntilNextDisplayedSecond
-        // Resuming from the menu ticks, notifications report the end of each away state,
-        // and the app wakes when working hours begin.
+        // Resuming from the menu ticks, and notifications report the end of each away state. The app also wakes
+        // as working hours begin or end, and the end resets a countdown that's paused by hand.
         case .manual, .outsideWorkingHours, .unavailable: nil
         }
     }
@@ -84,17 +84,17 @@ public struct BreakTimer: Sendable {
         }
     }
 
-    /// Also outside working hours, which only keep breaks from coming due.
+    /// Breaks can also start outside working hours, which only keep them from coming due.
     public var canStartBreak: Bool {
         phase == .working && !isManuallyPaused && activity == .active
     }
 
     /// Whether a tick at `now` would start a break unless a meeting holds it, so the activity sampled for that tick
     /// decides the break. A break that a meeting holds stays due.
-    public func isBreakDue(at now: TimeInterval) -> Bool {
+    public func isBreakDue(at now: TimeInterval, withinWorkingHours: Bool = true) -> Bool {
         // A trial tick on a copy can't drift from what `tick` does.
         var trial = self
-        return trial.tick(at: now, activity: .active) == .started
+        return trial.tick(at: now, activity: .active, withinWorkingHours: withinWorkingHours) == .started
     }
 
     private var shortBreaksTaken = 0

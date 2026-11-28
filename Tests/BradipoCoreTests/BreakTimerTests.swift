@@ -568,7 +568,7 @@ func unavailableMacWaitsForWakeBeforeSchedulingMoreTicks(manuallyPaused: Bool) {
     #expect(timer.pauseReason == .outsideWorkingHours)
     #expect(timer.remainingSeconds == 20)
     // Long after the old deadline, no break has come due.
-    #expect(!timer.isBreakDue(at: 600))
+    #expect(!timer.isBreakDue(at: 600, withinWorkingHours: false))
     #expect(timer.tick(at: 600, activity: .active, withinWorkingHours: false) == nil)
     #expect(timer.phase == .working)
     #expect(timer.remainingSeconds == 20)

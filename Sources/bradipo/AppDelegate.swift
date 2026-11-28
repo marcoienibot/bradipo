@@ -52,7 +52,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                             end: ScheduleLimits.timeOfDay(defaults.integer(forKey: DefaultsKey.workingHoursEnd)),
                             days: ScheduleLimits.workingDays(defaults.integer(forKey: DefaultsKey.workingDays)))
     }
-    private var withinWorkingHours: Bool { workingHours?.contains(Date(), in: calendar) ?? true }
+    /// Each tick and the render after it read the clock once, so they agree on which side of a boundary they're on.
+    /// A render that read it again just after the boundary could schedule the wake for the next one instead.
+    private func withinWorkingHours(at date: Date) -> Bool {
+        workingHours?.contains(date, in: calendar) ?? true
+    }
     private let calendar = Calendar.autoupdatingCurrent
     private var clock: BreakTimer
     private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
@@ -86,7 +90,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             button.action = #selector(statusItemClicked(_:))
             button.sendAction(on: [.leftMouseDown, .rightMouseDown])
             button.title = clock.formattedRemainingTime
-            stateSymbol.symbolConfiguration = .init(pointSize: NSFont.systemFontSize, weight: .bold)
             stateSymbol.autoresizingMask = [.width, .height]
             stateSymbol.setAccessibilityElement(false)
             stateSymbol.isHidden = true
@@ -117,8 +120,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // The tick follows a restart, so it can't start a break.
         let state = activity.sample(detectMeetings: deferBreaksDuringMeetings, fresh: false)
         let start = now
+        let date = Date()
         clock.restart(at: start)
-        clock.tick(at: start, activity: state, withinWorkingHours: withinWorkingHours)
+        clock.tick(at: start, activity: state, withinWorkingHours: withinWorkingHours(at: date))
         activity.onChange = { [weak self] in self?.tick() }
         // Working hours follow the wall clock, which can be set or change time zone while the Mac stays awake.
         // A new day can change when reminders are back from "tomorrow" to today.
@@ -127,7 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 MainActor.assumeIsolated { self?.tick() }
             }
         }
-        render()
+        render(at: date)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -212,28 +216,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func update(fresh: Bool) {
         // Use one timestamp, so the tick that starts a break is the one whose sample was fresh.
         let time = now
-        let state = activity.sample(detectMeetings: deferBreaksDuringMeetings, fresh: fresh || clock.isBreakDue(at: time))
-        let transition = clock.tick(at: time, activity: state, withinWorkingHours: withinWorkingHours)
-        render()
+        let date = Date()
+        let within = withinWorkingHours(at: date)
+        let isBreakDue = clock.isBreakDue(at: time, withinWorkingHours: within)
+        let state = activity.sample(detectMeetings: deferBreaksDuringMeetings, fresh: fresh || isBreakDue)
+        let transition = clock.tick(at: time, activity: state, withinWorkingHours: within)
+        render(at: date)
         if let setting = breakSounds.first(where: { $0.transition == transition }), defaults.bool(forKey: setting.key) {
             NSSound(named: setting.sound)?.play()
         }
     }
 
-    private func render() {
+    /// `date` is the moment the tick before it read the clock.
+    private func render(at date: Date) {
         let time = clock.formattedRemainingTime
         let resting = clock.phase == .resting
         let reason: String? = switch clock.pauseReason {
         case .manual: "Reminders paused"
-        case .outsideWorkingHours: outsideWorkingHoursDescription
+        case .outsideWorkingHours: outsideWorkingHoursDescription(at: date)
         case .meeting: "\(clock.breakKind.title) due · \(meetingDescription)"
         case .unavailable: "Paused · Mac is away"
         case nil: nil
         }
         let paused = clock.isManuallyPaused
-        let symbol: String? = switch clock.pauseReason {
-        case .manual: "pause.fill"
-        case .outsideWorkingHours: "moon.fill"
+        let symbol: (name: String, size: CGFloat)? = switch clock.pauseReason {
+        case .manual: ("pause.fill", NSFont.systemFontSize)
+        // At the text's size the moon would be wider than the pause symbol and cover the digits beside the colon.
+        case .outsideWorkingHours: ("moon.fill", 9)
         case .meeting, .unavailable, nil: nil
         }
         if let button = statusItem.button {
@@ -244,7 +253,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 title.addAttribute(.foregroundColor, value: NSColor.clear, range: (time as NSString).range(of: ":"))
                 button.attributedTitle = title
             }
-            stateSymbol.image = symbol.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: nil) }
+            stateSymbol.symbolConfiguration = symbol.map { .init(pointSize: $0.size, weight: .bold) }
+            stateSymbol.image = symbol.flatMap { NSImage(systemSymbolName: $0.name, accessibilityDescription: nil) }
             stateSymbol.isHidden = symbol == nil
             // The title is monospaced, so in m:ss the colon sits half a character left of center.
             let halfCharacter = button.attributedTitle.size().width / CGFloat(time.count) / 2
@@ -273,7 +283,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         timer?.invalidate()
         // Outside working hours nothing else ticks, and a countdown that's held within them resets as they end.
         guard let delay = clock.timeUntilNextTick
-                ?? workingHours?.nextChange(after: Date(), in: calendar)?.timeIntervalSinceNow else {
+                ?? workingHours?.nextBoundary(after: date, in: calendar)?.timeIntervalSinceNow else {
             timer = nil
             return
         }
@@ -294,11 +304,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// Says when reminders are back: "at 9:00" for today, "tomorrow at 9:00", or "Monday at 9:00" later in the week.
-    private var outsideWorkingHoursDescription: String {
-        guard let start = workingHours?.nextChange(after: Date(), in: calendar) else { return "Outside working hours" }
-        let day = calendar.isDateInToday(start) ? "" : calendar.isDateInTomorrow(start) ? "tomorrow "
-            : "\(start.formatted(.dateTime.weekday(.wide))) "
+    /// Says when reminders are back: "at 9:00" for today, "tomorrow at 9:00", or "Monday at 9:00" later on.
+    private func outsideWorkingHoursDescription(at date: Date) -> String {
+        guard let start = workingHours?.nextBoundary(after: date, in: calendar) else { return "Outside working hours" }
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: start))
+        let day = switch days.day {
+        case 0: ""
+        case 1: "tomorrow "
+        default: "\(start.formatted(.dateTime.weekday(.wide))) "
+        }
         return "Outside working hours · Back \(day)at \(start.formatted(date: .omitted, time: .shortened))"
     }
 
@@ -321,14 +335,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func startBreak(_ sender: NSMenuItem) {
         let time = now
+        let date = Date()
         clock.tick(at: time, activity: activity.sample(detectMeetings: deferBreaksDuringMeetings, fresh: true),
-                   withinWorkingHours: withinWorkingHours)
+                   withinWorkingHours: withinWorkingHours(at: date))
         if sender === takeLongBreak {
             clock.startLongBreak(at: time)
         } else {
             clock.startBreak(at: time)
         }
-        render()
+        render(at: date)
     }
 
     @objc private func restartTimer() {
