@@ -35,6 +35,13 @@ final class SettingsWindow: NSWindow {
         if !isVisible, let search = contentView?.firstSubview(of: NSSearchField.self) { makeFirstResponder(search) }
         super.makeKeyAndOrderFront(sender)
     }
+
+    /// A field still being edited saves what it shows, as when the keyboard leaves it. Otherwise the edit
+    /// would stay open in the hidden window and be saved only when Settings opens again.
+    override func close() {
+        makeFirstResponder(nil)
+        super.close()
+    }
 }
 
 private extension NSView {
