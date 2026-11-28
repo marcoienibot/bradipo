@@ -9,56 +9,49 @@ typealias ViewState = State
 /// Typing in the sidebar's search field lists the sections and settings that match instead.
 struct SettingsView: View {
     let host: SettingsHost
-    @ViewState private var query = ""
-    @ViewState private var selection = SettingsSearch.Place(section: .rhythm)
-    /// The section the person last chose, which a search that's given up goes back to.
-    @ViewState private var home = SettingsSection.rhythm
+    @ViewState private var navigation = SettingsNavigation()
     /// The setting a search result points at, marked in its form for a moment.
     @ViewState private var marked: Setting?
     @ViewState private var unmark: Task<Void, Never>?
-
-    /// Nil while the sidebar shows the sections.
-    private var results: (sections: [SettingsSearch.Hit], settings: [SettingsSearch.Hit])? {
-        query.allSatisfy(\.isWhitespace) ? nil : SettingsSearch.results(for: query)
-    }
-    /// During a search, only the sections whose own titles match.
-    private var sections: [SettingsSearch.Hit] {
-        results?.sections ?? SettingsSection.allCases.map { .init(place: .init(section: $0)) }
-    }
-    private var sidebarPlaces: [SettingsSearch.Place] {
-        (sections + (results?.settings ?? [])).map(\.place)
-    }
+    @FocusState private var listHasKeyboard: Bool
 
     var body: some View {
         // The sidebar is the only way around, so it can't be collapsed.
         NavigationSplitView(columnVisibility: .constant(.all)) {
             VStack(spacing: 6) {
-                SearchField(text: $query, move: moveSelection, submit: { choose(selection) })
+                SearchField(text: $navigation.query, move: { navigation.move(by: $0) }, submit: chooseSelection)
                     .padding(.horizontal, 10)
                 ScrollViewReader { list in
                     // A list's selection is optional, but a section is always showing.
-                    List(selection: Binding { selection } set: { if let place = $0 { choose(place) } }) {
-                        ForEach(sections, id: \.place, content: SidebarLabel.init)
-                        if let settings = results?.settings, !settings.isEmpty {
+                    List(selection: Binding { navigation.selection } set: { if let place = $0 { navigation.choose(place) } }) {
+                        ForEach(navigation.sections, id: \.place, content: SidebarLabel.init)
+                        if !navigation.settings.isEmpty {
                             Section("Settings") {
-                                ForEach(settings, id: \.place, content: SidebarLabel.init)
+                                ForEach(navigation.settings, id: \.place, content: SidebarLabel.init)
                             }
                         }
                     }
                     .overlay {
-                        if sidebarPlaces.isEmpty { ContentUnavailableView.search(text: query) }
+                        if navigation.places.isEmpty { ContentUnavailableView.search(text: navigation.query) }
                     }
                     // The arrow keys move the selection from the search field, which doesn't scroll the list.
-                    .onChange(of: selection) { list.scrollTo(selection) }
+                    .onChange(of: navigation.selection) { list.scrollTo(navigation.selection) }
+                    // The list only reports a click that changes its selection. A click on the result that
+                    // typing already selected still moves the keyboard into the list, so that chooses it.
+                    .focused($listHasKeyboard)
+                    .onChange(of: listHasKeyboard) {
+                        if listHasKeyboard { chooseSelection() }
+                    }
                 }
             }
             .toolbar(removing: .sidebarToggle)
             // The width only takes effect as the column's outermost modifier.
             .navigationSplitViewColumnWidth(215)
         } detail: {
+            let section = navigation.selection.section
             ScrollViewReader { form in
                 Form {
-                    ForEach(selection.section.groups, id: \.self) { group in
+                    ForEach(section.groups, id: \.self) { group in
                         Section {
                             ForEach(group, id: \.self) { setting in
                                 SettingRow(setting: setting, host: host)
@@ -77,40 +70,26 @@ struct SettingsView: View {
                 // A long section can have the row scrolled out of sight. A grouped form scrolls to its boxes,
                 // which the groups identify, but not to the rows inside them.
                 .onChange(of: marked) {
-                    if let marked, let box = selection.section.groups.first(where: { $0.contains(marked) }) {
+                    if let marked, let box = section.groups.first(where: { $0.contains(marked) }) {
                         form.scrollTo(box, anchor: .top)
                     }
                 }
             }
-            .navigationTitle(selection.section.title)
+            .navigationTitle(section.title)
         }
         .frame(width: 720, height: 480)
         // Esc ends a search from anywhere in the window. The search field does it for itself.
-        .onExitCommand { query = "" }
-        .onChange(of: query) {
-            // The best match shows as someone types, and without a match the form stays as it is.
-            // Emptying the field without having chosen a result gives the search up.
-            selection = results == nil ? .init(section: home) : sidebarPlaces.first ?? selection
-        }
-        .onChange(of: selection) { mark() }
+        .onExitCommand { navigation.query = "" }
+        .onChange(of: navigation.selection) { mark() }
     }
 
-    /// A click, an arrow key or Return chooses a place. Typing only shows the best match.
-    private func choose(_ place: SettingsSearch.Place) {
-        selection = place
-        home = place.section
-        mark()
-    }
-
-    private func moveSelection(by offset: Int) {
-        let places = sidebarPlaces
-        guard let index = places.firstIndex(of: selection) else { return }
-        choose(places[min(max(index + offset, 0), places.count - 1)])
+    private func chooseSelection() {
+        if navigation.chooseSelection() { mark() }
     }
 
     private func mark() {
         unmark?.cancel()
-        marked = selection.setting
+        marked = navigation.selection.setting
         guard marked != nil else { return }
         unmark = Task {
             try? await Task.sleep(for: .seconds(1.5))
