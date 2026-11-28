@@ -19,8 +19,13 @@ struct SettingsView: View {
         // The sidebar is the only way around, so it can't be collapsed.
         NavigationSplitView(columnVisibility: .constant(.all)) {
             VStack(spacing: 6) {
-                SearchField(text: $navigation.query, move: { navigation.move(by: $0) }, submit: chooseSelection)
-                    .padding(.horizontal, 10)
+                // A choice marks its row again, also when it's the result that typing already showed.
+                SearchField(text: $navigation.query) { offset in
+                    if navigation.move(by: offset) { mark() }
+                } submit: {
+                    chooseSelection()
+                }
+                .padding(.horizontal, 10)
                 ScrollViewReader { list in
                     // A list's selection is optional, but a section is always showing.
                     List(selection: Binding { navigation.selection } set: { if let place = $0 { navigation.choose(place) } }) {

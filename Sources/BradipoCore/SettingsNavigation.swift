@@ -44,11 +44,14 @@ public struct SettingsNavigation: Sendable {
     }
 
     /// For the arrow keys: chooses the place this many rows down the sidebar, or up if negative,
-    /// stopping at the first and the last.
-    public mutating func move(by offset: Int) {
+    /// stopping at the first and the last, and says so. It can't while a search that found nothing
+    /// leaves the selection unlisted.
+    @discardableResult
+    public mutating func move(by offset: Int) -> Bool {
         let places = places
-        guard let index = places.firstIndex(of: selection) else { return }
+        guard let index = places.firstIndex(of: selection) else { return false }
         choose(places[min(max(index + offset, 0), places.count - 1)])
+        return true
     }
 
     /// For Return, and for a click on the row that typing already selected: chooses the selection and says so,
